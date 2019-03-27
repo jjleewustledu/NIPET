@@ -1,0 +1,16 @@
+running develop
+running egg_info
+writing requirements to nipet.egg-info/requires.txt
+writing nipet.egg-info/PKG-INFO
+writing top-level names to nipet.egg-info/top_level.txt
+writing dependency_links to nipet.egg-info/dependency_links.txt
+reading manifest file 'nipet.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+warning: no previously-included files found matching 'niftypet/nipet/sigaux.py'
+warning: no previously-included files found matching 'niftypet/nipet/xnat'
+writing manifest file 'nipet.egg-info/SOURCES.txt'
+running build_ext
+Creating /home2/jjlee/anaconda2/lib/python2.7/site-packages/nipet.egg-link (link to .)
+Adding nipet 1.1.8 to easy-install.pth file
+
+Installed /home2/jjlee/Docker/NiftyPETd/NIPET

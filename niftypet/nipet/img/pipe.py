@@ -7,6 +7,7 @@ import numpy as np
 import sys
 import os
 import scipy.ndimage as ndi
+import logging, sys
 from subprocess import call
 
 from niftypet import nimpa
@@ -60,16 +61,17 @@ def mmrchain(datain,        # all input data in a dictionary
                             # the list.  ignored if the list is empty.
             del_img_intrmd=False):
 
+    logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 
-    # decompose all the scanner parameters and constants
+    logging.debug('#decompose all the scanner parameters and constants')
     Cnt   = scanner_params['Cnt']
     txLUT = scanner_params['txLUT']
     axLUT = scanner_params['axLUT']
 
 
     # -------------------------------------------------------------------------
-    # FRAMES
-    # check for the provided dynamic frames
+    logging.debug('# FRAMES')
+    logging.debug('# check for the provided dynamic frames')
     if isinstance(frames, list):
         # Can be given in three ways:
         # * a 1D list (duration of each frame is listed)
@@ -80,21 +82,21 @@ def mmrchain(datain,        # all input data in a dictionary
         #   describing start and end of the time frame, [t0, t1]; 
         #   The number of time frames for this option is unlimited,
         #   provided the t0 and t1 are within the acquisition times.
-        
-        # 2D starting with entry 'fluid' or 'timings'
+
         if  isinstance(frames[0], basestring) and (frames[0]=='fluid' or frames[0]=='timings') \
             and all([isinstance(t,list) and len(t)==2 for t in frames[1:]]):
+            logging.debug("# 2D starting with entry 'fluid' or 'timings'")
             t_frms = frames[1:]
 
-        # if 2D definitions, starting with entry 'def':
         elif isinstance(frames[0], basestring) and frames[0]=='def' \
             and all([isinstance(t,list) and len(t)==2 for t in frames[1:]]):
+            logging.debug("# if 2D definitions, starting with entry 'def':")
             # get total time and list of all time frames
             dfrms = dynamic_timings(frames)
             t_frms = dfrms['timings'][1:]
 
-        # if 1D:
         elif all([isinstance(t, integers) for t in frames]):
+            logging.debug('# if 1D:')
             # get total time and list of all time frames
             dfrms = dynamic_timings(frames)
             t_frms = dfrms['timings'][1:]
@@ -144,17 +146,17 @@ def mmrchain(datain,        # all input data in a dictionary
     
     
     # -------------------------------------------------------------------------
-    # MU-MAPS
-    # get the mu-maps, if given;  otherwise will use blank mu-maps.
+    logging.debug('# MU-MAPS')
+    logging.debug('# get the mu-maps, if given;  otherwise will use blank mu-maps.')
     if tAffine:
         muod = obtain_image(mu_o, imtype='object mu-map', verbose=Cnt['VERBOSE'])
     else:
         muod = obtain_image(mu_o, Cnt=Cnt, imtype='object mu-map')
 
-    # hardware mu-map
+    logging.debug('# hardware mu-map')
     muhd = obtain_image(mu_h, Cnt, imtype='hardware mu-map')
 
-    # choose the mode of reconstruction based on the provided (or not) mu-maps
+    logging.debug('# choose the mode of reconstruction based on the provided (or not) mu-maps')
     if muod['exists'] and muhd['exists'] and recmod==-1:
         recmod = 3
     elif  (muod['exists'] or muhd['exists']) and recmod==-1:
@@ -174,7 +176,7 @@ def mmrchain(datain,        # all input data in a dictionary
     output['frames'] = t_frms
     output['#frames'] = nfrm
 
-    # if affine transformation is given the baseline mu-map in NIfTI file or dictionary has to be given
+    logging.debug('# if affine transformation is given the baseline mu-map in NIfTI file or dictionary has to be given')
     if not tAffine:
         if Cnt['VERBOSE']: print 'i> using the provided mu-map the same way for all frames.'
     else:
@@ -237,7 +239,7 @@ def mmrchain(datain,        # all input data in a dictionary
     if tAffine: output['fmureg'] = []
     if store_img_intrmd: output['fpeti'] = []
 
-    # dynamic images in one numpy array
+    logging.debug('# dynamic images in one numpy array')
     dynim = np.zeros((nfrm, Cnt['SO_IMZ'], Cnt['SO_IMY'], Cnt['SO_IMY']), dtype=np.float32)
     #if asked, output only scatter+randoms sinogram for each frame
     if ret_sinos and itr>1 and recmod>2:
@@ -250,14 +252,14 @@ def mmrchain(datain,        # all input data in a dictionary
 
     # starting frame index with reasonable prompt data 
     ifrmP = 0
-    # iterate over frame index
+    logging.debug('# iterate over frame index')
     for ifrm in range(nfrm):
         # start time of a current (ifrm-th) dynamic frame
         t0 = int(t_frms[ifrm][0])
         # end time of a current (ifrm-th) dynamic frame
         t1 = int(t_frms[ifrm][1])
         # --------------
-        # check if there is enough prompt data to do a reconstruction
+        logging.debug('# check if there is enough prompt data to do a reconstruction')
         # --------------
         print 'i> dynamic frame times t0, t1:', t0, t1
         if not histo:
@@ -274,7 +276,7 @@ def mmrchain(datain,        # all input data in a dictionary
             ifrmP = ifrm+1
             continue
         # --------------------
-        # transform the mu-map if given the affine transformation for each frame
+        logging.debug('# transform the mu-map if given the affine transformation for each frame')
         if tAffine:
             # create the folder for aligned (registered for motion compensation) mu-maps
             nimpa.create_dir(fmureg)
@@ -309,7 +311,7 @@ def mmrchain(datain,        # all input data in a dictionary
         else:
             frmno = ''
 
-        # run OSEM reconstruction of a single time frame
+        logging.debug('# run OSEM reconstruction of a single time frame')
         recimg = mmrrec.osemone(datain, [muhd['im'], muo], 
                                 hst, scanner_params,
                                 recmod=recmod, itr=itr, fwhm=fwhm,
@@ -334,8 +336,8 @@ def mmrchain(datain,        # all input data in a dictionary
         output['sinos'] = {'psino':dynpsn, 'ssino':dynssn, 'rsino':dynrsn}
 
     # ----------------------------------------------------------------------
-    # trim the PET image
-    # images have to be stored for PVC
+    logging.debug('# trim the PET image')
+    logging.debug('# images have to be stored for PVC')
     if pvcroi: store_img_intrmd = True
     if trim:
         # create file name
@@ -343,7 +345,7 @@ def mmrchain(datain,        # all input data in a dictionary
             fnm = os.path.basename(datain['lm_dcm'])[:20]
         elif 'lm_ima' in datain:
             fnm = os.path.basename(datain['lm_ima'])[:20]
-        # trim PET and upsample
+        logging.debug('# trim PET and upsample')
         petu = nimpa.trimim(
             dynim,
             affine=image_affine(datain, Cnt),
