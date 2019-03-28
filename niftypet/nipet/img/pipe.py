@@ -61,8 +61,6 @@ def mmrchain(datain,        # all input data in a dictionary
                             # the list.  ignored if the list is empty.
             del_img_intrmd=False):
 
-    logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
-
     logging.debug('#decompose all the scanner parameters and constants')
     Cnt   = scanner_params['Cnt']
     txLUT = scanner_params['txLUT']
@@ -106,14 +104,14 @@ def mmrchain(datain,        # all input data in a dictionary
     else:
         print 'e> osemdyn: provided dynamic frames definitions are not in either Python list or nympy array.'
         raise TypeError('Wrong data type for dynamic frames')
-    # number of dynamic time frames
+    logging.debug('# number of dynamic time frames->' + str(len(t_frms)))
     nfrm = len(t_frms)
     # -------------------------------------------------------------------------
 
     
 
     # -------------------------------------------------------------------------
-    # create folders for results
+    logging.debug('# create folders for results')
     if outpath=='':     
         petdir = os.path.join(datain['corepath'], 'reconstructed')
         fmudir = os.path.join(datain['corepath'], 'mumap-obj')
@@ -123,12 +121,12 @@ def mmrchain(datain,        # all input data in a dictionary
         fmudir = os.path.join(outpath, 'mumap-obj')
         pvcdir = os.path.join(outpath, 'PRCL')
 
-    # folder for co-registered mu-maps (for motion compensation)
+    logging.debug('# folder for co-registered mu-maps (for motion compensation)')
     fmureg = os.path.join( fmudir, 'registered')
-    # folder for affine transformation MR/CT->PET
+    logging.debug('# folder for affine transformation MR/CT->PET')
     petaff = os.path.join( petdir, 'faffine')
 
-    # folder for reconstructed images (dynamic or static depending on number of frames).
+    logging.debug('# folder for reconstructed images (dynamic or static depending on number of frames).')
     if nfrm>1:
         petimg = os.path.join(petdir, 'multiple-frames')
         pvcdir = os.path.join(pvcdir, 'multiple-frames')
@@ -175,6 +173,8 @@ def mmrchain(datain,        # all input data in a dictionary
     output['recmod'] = recmod
     output['frames'] = t_frms
     output['#frames'] = nfrm
+    logging.debug('pipe.mmrchain.output->')
+    logging.debug(output)
 
     logging.debug('# if affine transformation is given the baseline mu-map in NIfTI file or dictionary has to be given')
     if not tAffine:
@@ -190,7 +190,7 @@ def mmrchain(datain,        # all input data in a dictionary
             print 'e> when tAffine is given, the object mu-map has to be provided either as a dictionary or NIfTI file!'
             raise NameError('No path to object mu-map.')
 
-        # check if all are file path strings to the existing files
+        logging.debug('# check if all are file path strings to the existing files')
         if all([isinstance(t, basestring) for t in tAffine]):
             if all([os.path.isfile(t) for t in tAffine]):
                 # the internal list of affine transformations
@@ -213,7 +213,7 @@ def mmrchain(datain,        # all input data in a dictionary
             raise StandardError('Affine transformations for each dynamic frame could not be established.')
 
         # -------------------------------------------------------------------------------------
-        # get ref image for mu-map resampling
+        logging.debug('# get ref image for mu-map resampling')
         # -------------------------------------------------------------------------------------
         if 'fmuref' in muod:
             fmuref = muod['fmuref']
@@ -235,13 +235,13 @@ def mmrchain(datain,        # all input data in a dictionary
         output['fmuref'] = fmuref
         output['faffine'] = faff_frms
 
-    # output list of intermidiate file names for mu-maps and PET images (useful for dynamic imaging)
+    logging.debug('# output list of intermidiate file names for mu-maps and PET images (useful for dynamic imaging)')
     if tAffine: output['fmureg'] = []
     if store_img_intrmd: output['fpeti'] = []
 
     logging.debug('# dynamic images in one numpy array')
     dynim = np.zeros((nfrm, Cnt['SO_IMZ'], Cnt['SO_IMY'], Cnt['SO_IMY']), dtype=np.float32)
-    #if asked, output only scatter+randoms sinogram for each frame
+    logging.debug('#if asked, output only scatter+randoms sinogram for each frame')
     if ret_sinos and itr>1 and recmod>2:
         dynrsn = np.zeros((nfrm, Cnt['NSN11'], Cnt['NSANGLES'], Cnt['NSBINS']), dtype=np.float32)
         dynssn = np.zeros((nfrm, Cnt['NSN11'], Cnt['NSANGLES'], Cnt['NSBINS']), dtype=np.float32)
@@ -250,7 +250,7 @@ def mmrchain(datain,        # all input data in a dictionary
 
     # import pdb; pdb.set_trace()
 
-    # starting frame index with reasonable prompt data 
+    logging.debug('# starting frame index with reasonable prompt data')
     ifrmP = 0
     logging.debug('# iterate over frame index')
     for ifrm in range(nfrm):
@@ -282,7 +282,7 @@ def mmrchain(datain,        # all input data in a dictionary
             nimpa.create_dir(fmureg)
             # the converted nii image resample to the reference size
             fmu = os.path.join(fmureg, 'mumap_dyn_frm'+str(ifrm)+fcomment+'.nii.gz')
-            # command for resampling
+            logging.debug('# command for resampling')
             if os.path.isfile( Cnt['RESPATH'] ):
                 cmd = [Cnt['RESPATH'],
                 '-ref', fmuref,
@@ -305,7 +305,7 @@ def mmrchain(datain,        # all input data in a dictionary
             muo = muod['im']
         #---------------------
 
-        # output image file name
+        logging.debug('# output image file name')
         if nfrm>1:
             frmno = '_frm'+str(ifrm)
         else:
@@ -321,7 +321,7 @@ def mmrchain(datain,        # all input data in a dictionary
                                 store_img=store_img_intrmd,
                                 store_itr=store_itr,
                                 ret_sinos=ret_sinos)
-        # form dynamic numpy array
+        logging.debug('# form dynamic numpy array')
         dynim[ifrm,:,:,:] = recimg.im
         if ret_sinos and itr>1 and recmod>2:
             dynpsn[ifrm,:,:,:] = hst['psino']
@@ -340,7 +340,7 @@ def mmrchain(datain,        # all input data in a dictionary
     logging.debug('# images have to be stored for PVC')
     if pvcroi: store_img_intrmd = True
     if trim:
-        # create file name
+        logging.debug('# trim; create file name')
         if 'lm_dcm' in datain:
             fnm = os.path.basename(datain['lm_dcm'])[:20]
         elif 'lm_ima' in datain:
@@ -367,7 +367,7 @@ def mmrchain(datain,        # all input data in a dictionary
 
 
     # ----------------------------------------------------------------------
-    #run PVC if requested and required input given
+    logging.debug('#run PVC if requested and required input given')
     if pvcroi:
         if not os.path.isfile(datain['T1lbl']):
             print 'e> no label image from T1 parcellations and/or ROI definitions!'
@@ -380,7 +380,7 @@ def mmrchain(datain,        # all input data in a dictionary
                 if isinstance(psfkernel, (np.ndarray, np.generic)) and psfkernel.shape!=(3, 17):
                     print 'e> the PSF kernel has to be an numpy array with the shape of (3, 17)!'
                     raise IndexError('PSF: wrong shape or not a matrix')
-        # perform PVC for each time frame
+        logging.debug('# perform PVC for each time frame')
         froi2 = []
         fpvc = []
         dynpvc = np.zeros(petu['im'].shape, dtype=np.float32)
@@ -398,7 +398,7 @@ def mmrchain(datain,        # all input data in a dictionary
             else:
                 fcomment_pvc = fcomment
             #============================
-            # perform PVC
+            logging.debug('# perform PVC')
             petpvc_dic = nimpa.pvc_iyang(
                 petu['fimi'][i],
                 datain,
@@ -418,13 +418,13 @@ def mmrchain(datain,        # all input data in a dictionary
 
             froi2.append(petpvc_dic['froi'])
             fpvc.append(petpvc_dic['fpet'])
-        # update output dictionary
+        logging.debug('# update output dictionary')
         output.update({'impvc':dynpvc, 'froi':froi2, 'fpvc':fpvc})
     # ----------------------------------------------------------------------
 
     if store_img:
-        # description for saving NIFTI image
-        # attenuation number: if only bed present then it is 0.5
+        logging.debug('# description for saving NIFTI image')
+        logging.debug('# attenuation number: if only bed present then it is 0.5')
         attnum =  ( 1*muhd['exists'] + 1*muod['exists'] ) / 2.
         descrip =    'alg=osem'                     \
                     +';att='+str(attnum*(recmod>0)) \
@@ -438,9 +438,9 @@ def mmrchain(datain,        # all input data in a dictionary
         # squeeze the not needed dimensions
         dynim = np.squeeze(dynim)
 
-        # NIfTI file name for the full PET image (single or multiple frame)
+        logging.debug('# NIfTI file name for the full PET image (single or multiple frame)')
         
-        # save the image to NIfTI file
+        logging.debug('# save the image to NIfTI file')
         if nfrm==1:
             t0 = hst['t0']
             t1 = hst['t1']
@@ -455,9 +455,9 @@ def mmrchain(datain,        # all input data in a dictionary
             fpeto = fpet+fcomment+'.nii.gz'
             nimpa.prc.array2nii( dynim[:,::-1,::-1,:], recimg.affine, fpeto, descrip=descrip)
 
-        # get output file names for trimmed/PVC images
+        logging.debug('# get output file names for trimmed/PVC images')
         if trim:
-            # folder for trimmed and dynamic
+            logging.debug('# trim; folder for trimmed and dynamic')
             pettrim = os.path.join( petimg, 'trimmed')
             # make folder
             nimpa.create_dir(pettrim)
@@ -467,7 +467,7 @@ def mmrchain(datain,        # all input data in a dictionary
             fpetu = os.path.join(pettrim, os.path.basename(fpet) + '_trimmed-upsampled-scale-'+str(trim_scale))
             # in case of PVC
             if pvcroi:
-                # itertive Yang (iY) added to NIfTI descritoption
+                logging.debug('# itertive Yang (iY) added to NIfTI descritoption')
                 descrip_pvc = descrip_trim + ';pvc=iY'
                 # file name for saving the PVC NIfTI image
                 fpvc = fpetu + '_PVC' + fcomment + '.nii.gz'
@@ -475,12 +475,12 @@ def mmrchain(datain,        # all input data in a dictionary
 
             # update the trimmed image file name
             fpetu += fcomment+'.nii.gz'
-            # store the file name in the output dictionary
+            logging.debug('# trim; store the file name in the output dictionary')
             output['trimmed']['fpet'] = fpetu
 
         output['fpet'] = fpeto
 
-        # save images
+        logging.debug('# save images')
         if nfrm==1:
             if trim:
                 nimpa.prc.array2nii( petu['im'][::-1,::-1,:], petu['affine'], fpetu, descrip=descrip_trim)

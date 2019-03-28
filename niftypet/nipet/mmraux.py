@@ -23,6 +23,7 @@ from niftypet import nimpa
 
 import resources
 import mmr_auxe
+import logging, sys
 
 #=================================================================================================
 def create_dir(pth):
@@ -989,7 +990,7 @@ def explore_input(fldr, params, print_paths=False):
 #=====================================================================================
 def putgaps(s, txLUT, Cnt):
 
-    #number of sino planes (2D sinos) depends on the span used
+    logging.debug('#number of sino planes (2D sinos) depends on the span used')
     if Cnt['SPN']==1:
         # number of rings calculated for the given ring range (optionally we can use only part of the axial FOV)
         NRNG_c = Cnt['RNG_END'] - Cnt['RNG_STRT']
@@ -1002,9 +1003,9 @@ def putgaps(s, txLUT, Cnt):
     elif Cnt['SPN']==11:
         nsinos = Cnt['NSN11']
 
-    #preallocate sino with gaps
+    logging.debug('#preallocate sino with gaps')
     sino = np.zeros((Cnt['NSANGLES'], Cnt['NSBINS'], nsinos), dtype=np.float32)
-    #fill the sino with gaps
+    logging.debug('#fill the sino with gaps')
     mmr_auxe.pgaps(sino, s.astype(np.float32), txLUT, Cnt)
     sino = np.transpose(sino, (2,0,1))
 
@@ -1012,12 +1013,12 @@ def putgaps(s, txLUT, Cnt):
 
 def remgaps(sino, txLUT, Cnt):
 
-    # number of sino planes (2D sinos) depends on the span used
+    logging.debug('# number of sino planes (2D sinos) depends on the span used')
     nsinos = sino.shape[0]
 
-    #preallocate output sino without gaps, always in float
+    logging.debug('#preallocate output sino without gaps, always in float')
     s = np.zeros((txLUT['Naw'], nsinos), dtype=np.float32)
-    #fill the sino with gaps
+    logging.debug('#fill the sino with gaps')
     mmr_auxe.rgaps(s, sino.astype(np.float32), txLUT, Cnt)
 
     # return in the same data type as the input sino

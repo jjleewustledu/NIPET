@@ -40,10 +40,11 @@ def fwhm2sig(fwhm, Cnt):
 def get_subsets14(n, params):
     ''' Define the n-th subset out of 14 in the transaxial projection space
     '''
+
     Cnt = params['Cnt']
     txLUT = params['txLUT']
 
-    # just for check of sums (have to be equal for all subsets to make them balanced)
+    logging.debug('# just for check of sums (have to be equal for all subsets to make them balanced)')
     aisum = np.sum(txLUT['msino'], axis=0)
     # number of subsets
     N = 14
@@ -58,7 +59,7 @@ def get_subsets14(n, params):
     # ======================================
     # sum of sino angle projections
     totsum = np.zeros(N, dtype=np.int32)
-    # iterate subset (which is also the angle iterator within block b)
+    logging.debug('# iterate subset (which is also the angle iterator within block b)')
     for s in range(N):
         # list of sino angular indexes for a given subset
         si = []
@@ -80,7 +81,7 @@ def get_subsets14(n, params):
         # print si
         S[s] = np.array((si))
 
-    # get the projection bin index for transaxial gpu sinos
+    logging.debug('# get the projection bin index for transaxial gpu sinos')
     tmsk = txLUT['msino']>0
     Smsk = -1*np.ones(tmsk.shape, dtype=np.int32)
     Smsk[tmsk] = range(Cnt['Naw'])
@@ -112,8 +113,6 @@ def osemone(datain, mumaps, hst, scanner_params,
             randsino = None,
             normcomp = None):
 
-    logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
-
     logging.debug('#---------- sort out OUTPUT ------------')
     logging.debug('#-output file name for the reconstructed image, initially assume n/a')
     fout = 'n/a'
@@ -137,7 +136,7 @@ def osemone(datain, mumaps, hst, scanner_params,
 
     if Cnt['VERBOSE']: print 'i> reconstruction in mode', recmod
 
-    # get object and hardware mu-maps
+    logging.debug('# get object and hardware mu-maps')
     muh, muo = mumaps
 
     logging.debug('# get the GPU version of the image dims')
@@ -152,7 +151,7 @@ def osemone(datain, mumaps, hst, scanner_params,
     psng = mmraux.remgaps(hst['psino'], txLUT, Cnt)
 
     #=========================================================================
-    # GET NORM
+    logging.debug('# GET NORM')
     #-------------------------------------------------------------------------
     if normcomp == None:
         ncmp, _ = mmrnorm.get_components(datain, Cnt)
@@ -163,7 +162,7 @@ def osemone(datain, mumaps, hst, scanner_params,
     #=========================================================================
 
     #=========================================================================
-    # ATTENUATION FACTORS FOR COMBINED OBJECT AND BED MU-MAP
+    logging.debug('# ATTENUATION FACTORS FOR COMBINED OBJECT AND BED MU-MAP')
     #-------------------------------------------------------------------------
     logging.debug('#> combine attenuation and norm together depending on reconstruction mode')
     if recmod==0:
@@ -235,7 +234,7 @@ def osemone(datain, mumaps, hst, scanner_params,
     logging.debug('#-mask for reconstructed image.  anything outside it is set to zero')
     msk = mmrimg.get_cylinder(Cnt, rad=mask_radious, xo=0, yo=0, unival=1, gpu_dim=True)>0.9
 
-    #-init image
+    logging.debug('#-init image')
     img = np.ones((Cnt['SZ_IMY'], Cnt['SZ_IMX'], Cnt['SZ_IMZ']), dtype=np.float32)
 
     logging.debug('#-decay correction')
@@ -255,7 +254,7 @@ def osemone(datain, mumaps, hst, scanner_params,
         qf = 1.
         qf_loc = 1.
 
-    #-affine matrix for the reconstructed images
+    logging.debug('#-affine matrix for the reconstructed images')
     B = mmrimg.image_affine(datain, Cnt)
 
     #-time it
@@ -325,6 +324,8 @@ def osemone(datain, mumaps, hst, scanner_params,
                 ';t1='+str(hst['t1']) +\
                 ';dur='+str(hst['dur']) +\
                 ';qf='+str(qf)
+    logging.debug('mmrrec.osemone.descrip->')
+    logging.debug(descrip)
 
     if fwhm>0:
         im = ndi.filters.gaussian_filter(im, fwhm2sig(fwhm, Cnt), mode='mirror')
@@ -361,7 +362,10 @@ def osemone(datain, mumaps, hst, scanner_params,
     else:
         RecOut = namedtuple('RecOut', 'im, fpet, affine')
         recout = RecOut(im, fout, B)
-        
+
+    # see also https://stackoverflow.com/questions/7521887/printing-named-tuples
+    logging.debug('mmrrec.osemone.recout->')
+    logging.debug("recout = %r" % (recout,))
     return recout
 
 

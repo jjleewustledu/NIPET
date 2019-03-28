@@ -81,6 +81,7 @@ def dynamic_timings(flist, offset=0):
     out['frames'] = array([ 15,  15,  15,  15,  30,  30,  30,  30, ...])
 
     '''
+
     if not isinstance(flist, list):
         raise TypeError('Wrong type of frame data input')
     if all([isinstance(t,(int, np.int32, np.int16, np.int8, np.uint8, np.uint16, np.uint32)) for t in flist]):
