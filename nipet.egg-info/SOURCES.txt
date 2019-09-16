@@ -88,6 +88,7 @@ niftypet/nipet/sct/src/sct.cu
 niftypet/nipet/sct/src/sct.h
 niftypet/nipet/sct/src/sct_module.cu
 niftypet/nipet/sct/src/sctaux.cu
+niftypet/nipet/sct/src/sctaux.cu.kludge
 niftypet/nipet/sct/src/sctaux.h
 niftypet/nipet/src/aux_module.cu
 niftypet/nipet/src/auxmath.cu

@@ -6,8 +6,7 @@ import os
 import sys
 
 import matplotlib
-if not matplotlib.get_backend():
-    matplotlib.use("Agg")
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.animation as manimation
 

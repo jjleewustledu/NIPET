@@ -203,7 +203,8 @@ def osemone(datain, mumaps, hst, scanner_params,
             ssng = mmraux.remgaps(sctsino, txLUT, Cnt)
         elif sctsino.size==0 and os.path.isfile(datain['em_crr']):
             emd = nimpa.getnii(datain['em_crr'])
-            ssn, sssr, amsk = nipet.sct.mmrsct.vsm(mumaps, emd['im'], datain, hst, rsino, 0.1, txLUT, axLUT, Cnt)
+            ssn, sssr, amsk = nipet.sct.mmrsct.vsm(
+                mumaps, emd['im'], datain, hst, rsino, scanner_params, prcntScl=max(0.1, Cnt['ETHRLD'])) # BUG FIX:  inconsistent interface with vsm
             ssng = mmraux.remgaps(ssn, txLUT, Cnt)
         else:
             print 'e> no emission image available for scatter estimation!  check if it''s present or the path is correct.'
@@ -267,7 +268,7 @@ def osemone(datain, mumaps, hst, scanner_params,
             print ''
             print '--------------- itr-{}/{} ---------------'.format(k,itr)
         petprj.osem(img, msk, psng, rsng, ssng, nsng, asng, imgsens, txLUT, axLUT, sinoTIdx, Cnt)
-        if np.nansum(img)<0.1:
+        if np.nansum(img)<0.02:
             print '---------------------------------------------------------------------'
             print 'w> it seems there is not enough true data to render reasonable image.'
             print '---------------------------------------------------------------------'
@@ -283,7 +284,7 @@ def osemone(datain, mumaps, hst, scanner_params,
                 hst,
                 rsino,
                 scanner_params,
-                prcntScl=0.1,
+                prcntScl=max(0.1, Cnt['ETHRLD']),
                 emmsk=emmskS)
             ssng = mmraux.remgaps(ssn, txLUT, Cnt)
             if Cnt['VERBOSE']: print 'i> scatter time:', (time.time() - sct_time)
