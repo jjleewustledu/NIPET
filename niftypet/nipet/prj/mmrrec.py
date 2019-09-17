@@ -9,6 +9,7 @@ import sys
 import os
 import scipy.ndimage as ndi
 from collections import namedtuple
+from tqdm.auto import trange
 
 import petprj
 
@@ -19,7 +20,6 @@ from niftypet import nimpa
 
 # for isotope info
 import resources
-import logging, sys
 
 #reconstruction mode:
 # 0 - no attenuation  and  no scatter
@@ -40,11 +40,10 @@ def fwhm2sig(fwhm, Cnt):
 def get_subsets14(n, params):
     ''' Define the n-th subset out of 14 in the transaxial projection space
     '''
-
     Cnt = params['Cnt']
     txLUT = params['txLUT']
 
-    logging.debug('# just for check of sums (have to be equal for all subsets to make them balanced)')
+    # just for check of sums (have to be equal for all subsets to make them balanced)
     aisum = np.sum(txLUT['msino'], axis=0)
     # number of subsets
     N = 14
@@ -59,7 +58,7 @@ def get_subsets14(n, params):
     # ======================================
     # sum of sino angle projections
     totsum = np.zeros(N, dtype=np.int32)
-    logging.debug('# iterate subset (which is also the angle iterator within block b)')
+    # iterate subset (which is also the angle iterator within block b)
     for s in range(N):
         # list of sino angular indexes for a given subset
         si = []
@@ -81,7 +80,7 @@ def get_subsets14(n, params):
         # print si
         S[s] = np.array((si))
 
-    logging.debug('# get the projection bin index for transaxial gpu sinos')
+    # get the projection bin index for transaxial gpu sinos
     tmsk = txLUT['msino']>0
     Smsk = -1*np.ones(tmsk.shape, dtype=np.int32)
     Smsk[tmsk] = range(Cnt['Naw'])
@@ -101,20 +100,28 @@ def get_subsets14(n, params):
 
 #---------------------------------------------------------------------------------------------------------#
 #=== OSEM image reconstruction with several modes (with/without scatter and/or attenuation correction) ===#
-def osemone(datain, mumaps, hst, scanner_params,
-            recmod=3, itr=4, fwhm=0., mask_radious=29.,
-            sctsino=np.array([]),
-            outpath='',
-            store_img=False, frmno='', fcomment='',
-            store_itr=[],
-            emmskS=False,
-            ret_sinos=False,
-            attnsino = None,
-            randsino = None,
-            normcomp = None):
+def osemone(
+        datain,
+        mumaps,
+        hst,
+        scanner_params,
+        recmod=3,
+        itr=4, 
+        fwhm=0.,
+        mask_radius=29.,
+        sctsino=np.array([]),
+        outpath='',
+        store_img=False, frmno='', fcomment='',
+        store_itr=[],
+        emmskS=False,
+        ret_sinos=False,
+        attnsino = None,
+        randsino = None,
+        normcomp = None):
 
-    logging.debug('#---------- sort out OUTPUT ------------')
-    logging.debug('#-output file name for the reconstructed image, initially assume n/a')
+
+    #---------- sort out OUTPUT ------------
+    #-output file name for the reconstructed image, initially assume n/a
     fout = 'n/a'
     if store_img or store_itr:
         if outpath=='':
@@ -122,9 +129,17 @@ def osemone(datain, mumaps, hst, scanner_params,
         else:
             opth = outpath
         mmraux.create_dir(opth)
+
+    if ret_sinos:
+        return_ssrb = True
+        return_mask = True
+    else:
+        return_ssrb = False
+        return_mask = False
+
     #----------
 
-    logging.debug('# Get particular scanner parameters: Constants, transaxial and axial LUTs')
+    # Get particular scanner parameters: Constants, transaxial and axial LUTs
     Cnt   = scanner_params['Cnt']
     txLUT = scanner_params['txLUT']
     axLUT = scanner_params['axLUT']
@@ -136,10 +151,10 @@ def osemone(datain, mumaps, hst, scanner_params,
 
     if Cnt['VERBOSE']: print 'i> reconstruction in mode', recmod
 
-    logging.debug('# get object and hardware mu-maps')
+    # get object and hardware mu-maps
     muh, muo = mumaps
 
-    logging.debug('# get the GPU version of the image dims')
+    # get the GPU version of the image dims
     mus = mmrimg.convert2dev(muo+muh, Cnt)
 
     if Cnt['SPN']==1:
@@ -147,11 +162,11 @@ def osemone(datain, mumaps, hst, scanner_params,
     elif Cnt['SPN']==11:
         snno = Cnt['NSN11']
 
-    logging.debug('# remove gaps from the prompt sino')
+    # remove gaps from the prompt sino
     psng = mmraux.remgaps(hst['psino'], txLUT, Cnt)
 
     #=========================================================================
-    logging.debug('# GET NORM')
+    # GET NORM
     #-------------------------------------------------------------------------
     if normcomp == None:
         ncmp, _ = mmrnorm.get_components(datain, Cnt)
@@ -162,13 +177,13 @@ def osemone(datain, mumaps, hst, scanner_params,
     #=========================================================================
 
     #=========================================================================
-    logging.debug('# ATTENUATION FACTORS FOR COMBINED OBJECT AND BED MU-MAP')
+    # ATTENUATION FACTORS FOR COMBINED OBJECT AND BED MU-MAP
     #-------------------------------------------------------------------------
-    logging.debug('#> combine attenuation and norm together depending on reconstruction mode')
+    #> combine attenuation and norm together depending on reconstruction mode
     if recmod==0:
         asng = np.ones(psng.shape, dtype=np.float32)
     else:
-        logging.debug('#> check if the attenuation sino is given as an array')
+        #> check if the attenuation sino is given as an array
         if isinstance(attnsino, np.ndarray) \
                 and attnsino.shape==(Cnt['NSN11'], Cnt['NSANGLES'], Cnt['NSBINS']):
             asng = mmraux.remgaps(attnsino, txLUT, Cnt)
@@ -180,31 +195,38 @@ def osemone(datain, mumaps, hst, scanner_params,
         else:
             asng = np.zeros(psng.shape, dtype=np.float32)
             petprj.fprj(asng, mus, txLUT, axLUT, np.array([-1], dtype=np.int32), Cnt, 1)
-    logging.debug('#> combine attenuation and normalisation')
+    #> combine attenuation and normalisation
     ansng = asng*nsng
     #=========================================================================
 
     #=========================================================================
-    logging.debug('# Randoms')
+    # Randoms
     #-------------------------------------------------------------------------
     if isinstance(randsino, np.ndarray):
         rsino = randsino
         rsng = mmraux.remgaps(randsino, txLUT, Cnt)
     else:
-        rsino, snglmap = nipet.lm.mmrhist.rand(hst['fansums'], txLUT, axLUT, Cnt)
+        rsino, snglmap = nipet.randoms(hst, scanner_params)
         rsng = mmraux.remgaps(rsino, txLUT, Cnt)
     #=========================================================================
 
     #=========================================================================
-    logging.debug('# SCAT')
+    # SCAT
     #-------------------------------------------------------------------------
     if recmod==2:
         if sctsino.size>0:
             ssng = mmraux.remgaps(sctsino, txLUT, Cnt)
         elif sctsino.size==0 and os.path.isfile(datain['em_crr']):
             emd = nimpa.getnii(datain['em_crr'])
-            ssn, sssr, amsk = nipet.sct.mmrsct.vsm(
-                mumaps, emd['im'], datain, hst, rsino, scanner_params, prcntScl=max(0.1, Cnt['ETHRLD'])) # BUG FIX:  inconsistent interface with vsm
+            ssn = nipet.vsm(
+                datain,
+                mumaps,
+                emd['im'],
+                hst,
+                rsino,
+                scanner_params,
+                prcnt_scl = 0.1,
+                emmsk=False)
             ssng = mmraux.remgaps(ssn, txLUT, Cnt)
         else:
             print 'e> no emission image available for scatter estimation!  check if it''s present or the path is correct.'
@@ -214,16 +236,15 @@ def osemone(datain, mumaps, hst, scanner_params,
     #=========================================================================
 
     if Cnt['VERBOSE']:
-        print ''
-        print '>------ OSEM (', itr,  ') -------'
+        print '\n>------ OSEM (', itr,  ') -------\n'
     #------------------------------------
     Sn = 14 # number of subsets
-    logging.debug('#-get one subset to get number of projection bins in a subset')
+    #-get one subset to get number of projection bins in a subset
     Sprj, s = get_subsets14(0,scanner_params)
     Nprj = len(Sprj)
-    logging.debug('#-init subset array and sensitivity image for a given subset')
+    #-init subset array and sensitivity image for a given subset
     sinoTIdx = np.zeros((Sn, Nprj+1), dtype=np.int32)
-    logging.debug('#-init sensitivity images for each subset')
+    #-init sensitivity images for each subset
     imgsens = np.zeros((Sn, Cnt['SZ_IMY'], Cnt['SZ_IMX'], Cnt['SZ_IMZ']), dtype=np.float32)
     for n in range(Sn):
         sinoTIdx[n,0] = Nprj #first number of projection for the given subset
@@ -232,13 +253,13 @@ def osemone(datain, mumaps, hst, scanner_params,
         petprj.bprj(imgsens[n,:,:,:], ansng[sinoTIdx[n,1:],:], txLUT, axLUT,  sinoTIdx[n,1:], Cnt )
     #-------------------------------------
 
-    logging.debug('#-mask for reconstructed image.  anything outside it is set to zero')
-    msk = mmrimg.get_cylinder(Cnt, rad=mask_radious, xo=0, yo=0, unival=1, gpu_dim=True)>0.9
+    #-mask for reconstructed image.  anything outside it is set to zero
+    msk = mmrimg.get_cylinder(Cnt, rad=mask_radius, xo=0, yo=0, unival=1, gpu_dim=True)>0.9
 
-    logging.debug('#-init image')
+    #-init image
     img = np.ones((Cnt['SZ_IMY'], Cnt['SZ_IMX'], Cnt['SZ_IMZ']), dtype=np.float32)
 
-    logging.debug('#-decay correction')
+    #-decay correction
     lmbd = np.log(2)/resources.riLUT[Cnt['ISOTOPE']]['thalf']
     if Cnt['DCYCRR'] and 't0' in hst and 'dur' in hst:
         dcycrr = np.exp(lmbd*hst['t0'])*lmbd*hst['dur'] / (1-np.exp(-lmbd*hst['dur']))
@@ -255,20 +276,20 @@ def osemone(datain, mumaps, hst, scanner_params,
         qf = 1.
         qf_loc = 1.
 
-    logging.debug('#-affine matrix for the reconstructed images')
+    #-affine matrix for the reconstructed images
     B = mmrimg.image_affine(datain, Cnt)
 
     #-time it
     stime = time.time()
+
+    # import pdb; pdb.set_trace()
+
     #=========================================================================
-    logging.debug('# OSEM RECONSTRUCTION')
+    # OSEM RECONSTRUCTION
     #-------------------------------------------------------------------------
-    for k in range(itr):
-        if Cnt['VERBOSE']:
-            print ''
-            print '--------------- itr-{}/{} ---------------'.format(k,itr)
+    for k in trange(itr, disable=not Cnt['VERBOSE'], desc="OSEM"):
         petprj.osem(img, msk, psng, rsng, ssng, nsng, asng, imgsens, txLUT, axLUT, sinoTIdx, Cnt)
-        if np.nansum(img)<0.02:
+        if np.nansum(img)<0.1:
             print '---------------------------------------------------------------------'
             print 'w> it seems there is not enough true data to render reasonable image.'
             print '---------------------------------------------------------------------'
@@ -277,18 +298,30 @@ def osemone(datain, mumaps, hst, scanner_params,
             break
         if recmod>=3 and ( ((k<itr-1) and (itr>1)) ): # or (itr==1)
             sct_time = time.time()
-            ssn, sssr, amsk = nipet.sct.mmrsct.vsm(
+
+
+
+            sct = nipet.vsm(
+                datain,
                 mumaps,
                 mmrimg.convert2e7(img, Cnt),
-                datain,
                 hst,
                 rsino,
                 scanner_params,
-                prcntScl=max(0.1, Cnt['ETHRLD']),
-                emmsk=emmskS)
+                emmsk=emmskS,
+                return_ssrb=return_ssrb,
+                return_mask=return_mask)
+
+            if isinstance(sct, dict):
+                ssn = sct['sino']
+            else:
+                ssn = sct
+
             ssng = mmraux.remgaps(ssn, txLUT, Cnt)
+
             if Cnt['VERBOSE']: print 'i> scatter time:', (time.time() - sct_time)
-        logging.debug('# save images during reconstruction if requested')
+
+        # save images during reconstruction if requested
         if store_itr and k in store_itr:
             im = mmrimg.convert2e7(img * (dcycrr*qf*qf_loc), Cnt)
             fout =  os.path.join(opth, os.path.basename(datain['lm_bf'])[:8] \
@@ -300,15 +333,15 @@ def osemone(datain, mumaps, hst, scanner_params,
     if Cnt['VERBOSE']: print 'i> recon time:', (time.time() - stime)
     #=========================================================================
 
-    
-    if Cnt['VERBOSE']: 
+
+    if Cnt['VERBOSE']:
         print 'i> applying decay correction of', dcycrr
         print 'i> applying quantification factor', qf, 'to the whole image for the frame duration of :', hst['dur']
-    
+
     img *= dcycrr * qf * qf_loc #additional factor for making it quantitative in absolute terms (derived from measurements)
 
-    logging.debug('#---- save images -----')
-    logging.debug('#-first convert to standard mMR image size')
+    #---- save images -----
+    #-first convert to standard mMR image size
     im = mmrimg.convert2e7(img, Cnt)
 
     #-description text to NIfTI
@@ -325,8 +358,6 @@ def osemone(datain, mumaps, hst, scanner_params,
                 ';t1='+str(hst['t1']) +\
                 ';dur='+str(hst['dur']) +\
                 ';qf='+str(qf)
-    logging.debug('mmrrec.osemone.descrip->')
-    logging.debug(descrip)
 
     if fwhm>0:
         im = ndi.filters.gaussian_filter(im, fwhm2sig(fwhm, Cnt), mode='mirror')
@@ -359,14 +390,11 @@ def osemone(datain, mumaps, hst, scanner_params,
     #     recout.fpet = fout
     if ret_sinos and recmod>=3 and itr>1:
         RecOut = namedtuple('RecOut', 'im, fpet, affine, ssn, sssr, amsk, rsn')
-        recout = RecOut(im, fout, B, ssn, sssr, amsk, rsino)
+        recout = RecOut(im, fout, B, ssn, sct['ssrb'], sct['mask'], rsino)
     else:
         RecOut = namedtuple('RecOut', 'im, fpet, affine')
         recout = RecOut(im, fout, B)
 
-    # see also https://stackoverflow.com/questions/7521887/printing-named-tuples
-    logging.debug('mmrrec.osemone.recout->')
-    logging.debug("recout = %r" % (recout,))
     return recout
 
 
@@ -380,8 +408,8 @@ def osemone(datain, mumaps, hst, scanner_params,
 
 #===============================================================================
 # EMML
-# def emml(   datain, mumaps, hst, txLUT, axLUT, Cnt, 
-#             recmod=3, itr=10, fwhm=0., mask_radious=29., store_img=True, ret_sinos=False, sctsino = None, randsino = None, normcomp = None):
+# def emml(   datain, mumaps, hst, txLUT, axLUT, Cnt,
+#             recmod=3, itr=10, fwhm=0., mask_radius=29., store_img=True, ret_sinos=False, sctsino = None, randsino = None, normcomp = None):
 
 #     #subsets (when not used)
 #     sbs = np.array([-1], dtype=np.int32)
@@ -406,7 +434,7 @@ def osemone(datain, mumaps, hst, scanner_params,
 #     nrmsng = mmrnorm.get_sinog(datain, hst, axLUT, txLUT, Cnt, normcomp=ncmp)
 #     #=========================================================================
 
-    
+
 #     #=========================================================================
 #     # Randoms
 #     #-------------------------------------------------------------------------
@@ -431,7 +459,7 @@ def osemone(datain, mumaps, hst, scanner_params,
 #     attnrmsng = asng*nrmsng
 #     #=========================================================================
 
-    
+
 #     #=========================================================================
 #     # SCATTER and the additive term
 #     #-------------------------------------------------------------------------
@@ -454,7 +482,7 @@ def osemone(datain, mumaps, hst, scanner_params,
 #     #=========================================================================
 
 #     #mask for reconstructed image
-#     msk = mmrimg.get_cylinder(Cnt, rad=mask_radious, xo=0, yo=0, unival=1, gpu_dim=True)>0.9
+#     msk = mmrimg.get_cylinder(Cnt, rad=mask_radius, xo=0, yo=0, unival=1, gpu_dim=True)>0.9
 #     # estimated image
 #     imrec = np.ones((Cnt['SZ_IMY'], Cnt['SZ_IMX'], Cnt['SZ_IMZ']), dtype=np.float32)
 #     # backprj image
@@ -521,14 +549,14 @@ def osemone(datain, mumaps, hst, scanner_params,
 #                     ';qf='+str(qf)
 #         fout =  os.path.join(datain['corepath'], os.path.basename(datain['lm_dcm'])[:8]+'_emml_'+str(itr)+'.nii.gz')
 #         nimpa.array2nii( im[::-1,::-1,:], B, fout, descrip=descrip)
-            
+
 #     if ret_sinos and recmod>=3 and itr>1:
 #         RecOut = namedtuple('RecOut', 'im, fpet, affine, ssn, sssr, amsk, rsn')
 #         recout = RecOut(im, fout, B, ssn, sssr, amsk, rsn)
 #     else:
 #         RecOut = namedtuple('RecOut', 'im, fpet, affine')
 #         recout = RecOut(im, fout, B)
-    
+
 #     return recout
 
 
@@ -539,11 +567,11 @@ def osemone(datain, mumaps, hst, scanner_params,
 # OSEM
 
 # def osem14(datain, mumaps, hst, txLUT, axLUT, Cnt,
-#             recmod=3, itr=4, fwhm=0., mask_radious=29.):
+#             recmod=3, itr=4, fwhm=0., mask_radius=29.):
 
 #     muh, muo = mumaps
 #     mus = mmrimg.convert2dev(muo+muh, Cnt)
-    
+
 #     if Cnt['SPN']==1:
 #         snno = Cnt['NSN1']
 #     elif Cnt['SPN']==11:
@@ -596,7 +624,7 @@ def osemone(datain, mumaps, hst, scanner_params,
 #     #=========================================================================
 
 #     #mask for reconstructed image
-#     rcnmsk = mmrimg.get_cylinder(Cnt, rad=mask_radious, xo=0, yo=0, unival=1, gpu_dim=True)
+#     rcnmsk = mmrimg.get_cylinder(Cnt, rad=mask_radius, xo=0, yo=0, unival=1, gpu_dim=True)
 #     #-------------------------------------------------------------------------
 #     # number of subsets
 #     Sn = 14

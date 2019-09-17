@@ -154,8 +154,8 @@ def hist(datain, txLUT, axLUT, Cnt, frms=np.array([0], dtype=np.uint16), use_sto
         return
 
     #short (interval) projection views
-    pvs_sgtl = np.array( hstout['pvs']>>8, dtype=float)
-    pvs_crnl = np.array( np.bitwise_and(hstout['pvs'], 255), dtype=float )
+    pvs_sgtl = np.float32( np.right_shift(hstout['pvs'], 8) ) #.astype(np.float32)
+    pvs_crnl = np.float32( np.bitwise_and(hstout['pvs'], 255) ) #.astype(np.float32)
 
     cmass = Cnt['SO_VXZ']*ndi.filters.gaussian_filter(hstout['mss'], cmass_sig, mode='mirror')
     if Cnt['VERBOSE']: print 'i> centre of mass of axial radiodistribution (filtered with Gaussian of SD =', cmass_sig, '):  COMPLETED.'
@@ -201,9 +201,31 @@ def hist(datain, txLUT, axLUT, Cnt, frms=np.array([0], dtype=np.uint16), use_sto
 
     return pdata
 
-#================================================================================
+#===============================================================================
 # GET REDUCED VARIANCE RANDOMS
-#--------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+
+def randoms(hst, scanner_params, gpu_dim=False):
+    '''
+        Get the estimated sinogram of random events using the delayed event
+        measurement.  The delayed sinogram is in the histogram dictionary
+        obtained from the processing of the list-mode data.
+    '''
+
+    # constants, transaxial and axial LUTs are extracted
+    Cnt   = scanner_params['Cnt']
+    txLUT = scanner_params['txLUT']
+    axLUT = scanner_params['axLUT']
+
+    rndsino, singles = rand(hst['fansums'], txLUT, axLUT, Cnt)
+
+    if gpu_dim:
+        rsng = mmraux.remgaps(rndsino, txLUT, Cnt)
+        return rsng, singles
+    else:
+        return rndsino, singles
+
+
 def rand(fansums, txLUT, axLUT, Cnt):
 
     if    Cnt['SPN']==1:  nsinos=Cnt['NSN1']
@@ -346,7 +368,15 @@ def get_michem(sino, axLUT, Cnt):
 
 
 #------------------------------------------------------
-def draw_frames(hst, tfrms, plot_diff=True):
+def draw_frames(hst, tfrms, plot_diff = True, tlim = []):
+    '''
+    Draw graph of dynamic time frames on top of the head curve.
+    Input:
+        hst - the histogram dictionary with other LM processing outputs
+        tfrms - a list with timings for each frame 
+        plot_diff - when True, plots the difference between prompts and delayeds
+        tlim - a list of border values for x for the graph.
+    '''
     import matplotlib.pyplot as plt
     diff = np.int64(hst['phc']) - np.int64(hst['dhc'])
     plt.figure()
@@ -354,7 +384,9 @@ def draw_frames(hst, tfrms, plot_diff=True):
     plt.plot(hst['dhc'], label='randoms')
     if plot_diff:
         plt.plot(diff, label='difference')
-    for k in tfrms:
+
+    K = [f[0] for f in tfrms if isinstance(f,list)]
+    for k in K:
         yval = hst['phc'][k]
         if yval<0.2*np.max(hst['phc']):
             yval = 0.2*np.max(hst['phc'])
@@ -363,6 +395,8 @@ def draw_frames(hst, tfrms, plot_diff=True):
     plt.xlabel('time [sec]')
     plt.ylabel('counts/sec')
     plt.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+    if tlim != []:
+        plt.xlim(tlim)
 #------------------------------------------------------
 
 
@@ -375,31 +409,42 @@ def get_time_offset(hst):
     # return index, which will constitute time in seconds, for this offset
     return  len(s)-np.argmax(s[::-1])-1
 
-def split_frames(hst, Tref=60):
+def split_frames(hst, Tref=0, t0=0, t1=0):
     '''
-    Splits the whole acquisition data into approximately statistically equivalent frames
-    relative to the first frame whose duration is Tref.  The next frames will have a similar
-    count level.
+    Splits the whole acquisition data into approximately statistically 
+    equivalent frames relative to the reference frame whose duration is 
+    Tref or t1-t0.  The next frames will have a similar count level.
     hst: histogram dictionary
     Tref: reference duration in seconds
+    t0: start time of the reference frame
+    t1: end time of the reference frame
     '''
     # get the offset
-    ioff = get_time_offset(hst)
+    toff = get_time_offset(hst)
     # difference between prompts and randoms
     diff = np.int64(hst['phc']) - np.int64(hst['dhc'])
+
     # follow up index
-    i = ioff
-    j = i+Tref
+    i = t0 + (toff)*(t0<=0)
+    if Tref>0:
+        j = i+Tref
+    elif t1>0:
+        j = t1 + (toff)*(t0<=0)
+    else:
+        raise ValueError('e> could not figure out the reference frame.')
+
     # reference count level
     cref = np.sum(diff[i:j])
     # cumulative sum of the difference
     csum = np.cumsum(diff)
 
+    i = 0
+    j = toff
     # threshold to be achieved
     thrsh = csum[j-1] + cref
-    fdur = [j-i]
-    frms = [[i,j]]
-    clvl = [cref]
+    fdur = []
+    frms = ['timings']
+    clvl = [0]
     print 'counts t(%d,%d) = %d. diff=%d' % ( i,j,clvl[-1] , np.sum(diff[i:j])-cref )
     while thrsh<csum[-1]:
         i = j
@@ -423,7 +468,7 @@ def split_frames(hst, Tref=60):
         clvl[-1] += np.sum(diff[i:])
         i = frms[-1][0]
     print 'counts t(%d,%d) = %d. diff=%d' % ( i,j,clvl[-1] , np.sum(diff[i:j])-cref )
-    return {'timings':frms, 'fdur':fdur, 'fcnts':clvl, 'offset':ioff}
+    return {'timings':frms, 'fdur':fdur, 'fcnts':clvl, 'offset':toff, 'csum':csum}
 
 
 #-------------------------------------------------------------------------------------------------
@@ -508,22 +553,29 @@ def auxilary_frames(hst, t_frms, Cref=0, tr0=0, tr1=15, verbose = True):
     return {'timings':mfrm, 'frame_idx':fi2afi}
 
 
-def dynamic_timings(flist, offset=0):
+def dynamic_timings(flist, offset=0, output='timings'):
     '''
     Get start and end frame timings from a list of dynamic PET frame definitions.
     Arguments:
     flist can be 1D list of time duration for each dynamic frame, e.g.: flist = [15, 15, 15, 15, 30, 30, 30, ...]
         or a 2D list of lists having 2 entries per definition: first for the number of repetitions and the other
         for the frame duration, e.g.: flist = ['def', [4, 15], [8, 30], ...], meaning 4x15s, then 8x30s, etc.
+
     offset adjusts for the start time (usually when prompts are strong enough over randoms)
+
+    output ='timings', only timings are returned
+    output = 'all', a dictionary containing a list of frames durations, total time
+                    and a list of frame timings
+
     The output is a dictionary:
     out['timings'] = [[0, 15], [15, 30], [30, 45], [45, 60], [60, 90], [90, 120], [120, 150], ...]
     out['total'] = total time
     out['frames'] = array([ 15,  15,  15,  15,  30,  30,  30,  30, ...])
-
     '''
+
     if not isinstance(flist, list):
         raise TypeError('Wrong type of frame data input')
+    
     if all([isinstance(t,(int, np.int32, np.int16, np.int8, np.uint8, np.uint16, np.uint32)) for t in flist]):
         tsum = offset
         # list of frame timings
@@ -555,7 +607,7 @@ def dynamic_timings(flist, offset=0):
         #frame iterator
         fi = 0
         #time sum of frames
-        tsum = 0
+        tsum = offset
         # list of frame timings
         t_frames = ['timings']
         for i in range(0, farray.shape[0]):
@@ -571,7 +623,15 @@ def dynamic_timings(flist, offset=0):
                 fi += 1
     else:
         raise TypeError('Unrecognised time frame definitions.')
+    
     # prepare the output dictionary
-    out = {'total':tsum, 'frames':frms, 'timings':t_frames}
+    if output=='timings':
+        out = t_frames
+    elif output=='all':
+        out = {'total':tsum, 'frames':frms, 'timings':t_frames}
+    else:
+        out = None
+        print 'w> unrecognised output chosen--returning None'
+
     return out
 #=================================================================================================

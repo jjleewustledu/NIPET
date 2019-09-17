@@ -24,6 +24,8 @@ import multiprocessing
 from niftypet.nipet import mmraux
 from niftypet import nimpa
 
+import resources as rs
+
 
 #===================================================================================
 # IMAGE ROUTINES
@@ -55,7 +57,7 @@ def convert2dev(im, Cnt):
 
     if im.shape[1]!=Cnt['SO_IMY'] or im.shape[2]!=Cnt['SO_IMX']:
         raise ValueError('e> input image array is not of the correct Siemens shape.')
-    
+
     if 'rSZ_IMZ' in Cnt and im.shape[0]!=Cnt['rSZ_IMZ']:
         print 'w> the axial number of voxels does not match the reduced rings.'
     elif not 'rSZ_IMZ' in Cnt and im.shape[0]!=Cnt['SZ_IMZ']:
@@ -64,7 +66,7 @@ def convert2dev(im, Cnt):
     im_sqzd = np.zeros((im.shape[0], Cnt['SZ_IMY'], Cnt['SZ_IMX']), dtype=np.float32)
     margin = (Cnt['SO_IMX']-Cnt['SZ_IMX'])/2
     margin_=-margin
-    if margin==0: 
+    if margin==0:
         margin = None
         margin_= None
 
@@ -73,7 +75,7 @@ def convert2dev(im, Cnt):
     return im_sqzd
 
 def cropxy(im, imsize, datain, Cnt, store_pth=''):
-    '''Crop image transaxially to the size in tuple <imsize>.  
+    '''Crop image transaxially to the size in tuple <imsize>.
     Return the image and the affine matrix.
     '''
     if not imsize[0]%2==0 and not imsize[1]%2==0:
@@ -169,7 +171,7 @@ def getinterfile_off(fmu, Cnt, Offst=np.array([0., 0., 0.])):
     f = open(fmu, 'rb')
     mu = np.fromfile(f, np.float32)
     f.close()
-    
+
     # save_im(mur, Cnt, os.path.dirname(fmu) + '/mur.nii')
     #-------------------------------------------------------------------------
     mur = getmu_off(mu, Cnt)
@@ -192,7 +194,7 @@ def getinterfile_off(fmu, Cnt, Offst=np.array([0., 0., 0.])):
 #================================================================================
 def getinterfile(fim, Cnt):
     '''Return the floating point image file in an array from an Interfile file.'''
-    
+
     #read the image file
     f = open(fim, 'rb')
     im = np.fromfile(f, np.float32)
@@ -311,21 +313,34 @@ def mudcm2nii(datain, Cnt):
     return fmu
 
 # =====================================================================================
-def obj_mumap(datain, params, outpath='', store=False, comment='', gantry_offset=True):
+def obj_mumap(
+        datain,
+        params={},
+        outpath='',
+        comment='',
+        store=False,
+        store_npy=False,
+        gantry_offset=True,
+        del_auxilary=True,
+        ):
     '''Get the object mu-map from DICOM images'''
 
-    # two ways of passing Cnt are here decoded
+
+    # three ways of passing scanner constants <Cnt> are here decoded
     if 'Cnt' in params:
         Cnt = params['Cnt']
-    else:
+    elif 'SO_IMZ' in params:
         Cnt = params
+    else:
+        Cnt = rs.get_mmr_constants()
+
 
     # output folder
     if outpath=='':
         fmudir = os.path.join( datain['corepath'], 'mumap-obj' )
     else:
         fmudir = os.path.join( outpath, 'mumap-obj' )
-    mmraux.create_dir(fmudir)
+    nimpa.create_dir(fmudir)
     # ref file name
     fmuref = os.path.join(fmudir, 'muref.nii.gz')
     # ref affine
@@ -378,24 +393,28 @@ def obj_mumap(datain, params, outpath='', store=False, comment='', gantry_offset
     mu = np.float32(mu)/1e4
     mu[mu<0] = 0
 
-    # # del the temporary file for mumap
-    # os.remove(fmu)
-    # os.remove(fmunii)
-    
-    #return image dictionary with the image itself and some other stats
+    #> return image dictionary with the image itself and some other stats
     mu_dct = {  'im':mu,
-                'fmuref':fmuref,
                 'affine':A}
+    if not del_auxilary: mu_dct['fmuref'] = fmuref
 
-    # store the mu-map if requested (by default no)
-    if store:
+    # store the mu-map if requested
+    if store_npy:
         # to numpy array
         fnp = os.path.join(fmudir, 'mumap-from-DICOM.npy' )
         np.save(fnp, (mu, A))
+
+    if store:
         # with this file name
-        fmudir = os.path.join(fmudir, comment+'mumap-from-DICOM.nii.gz')
-        nimpa.array2nii(mu[::-1,::-1,:], A, fmudir)
-        mu_dct['fim'] = fmudir
+        fmumap = os.path.join(fmudir, 'mumap-from-DICOM_no-alignment'+comment+'.nii.gz')
+        nimpa.array2nii(mu[::-1,::-1,:], A, fmumap)
+        mu_dct['fim'] = fmumap
+
+    if del_auxilary:
+        os.remove(fmuref)
+        os.remove(fmunii)
+        os.remove(fmu)
+
 
     return mu_dct
 
@@ -404,8 +423,9 @@ def obj_mumap(datain, params, outpath='', store=False, comment='', gantry_offset
 #---------------------------------------------------------------------------------
 def align_mumap(
         datain,
-        scanner_params,
+        scanner_params={},
         outpath='',
+        use_stored=False,
         hst=[],
         t0=0, t1=0,
         itr=2,
@@ -413,32 +433,88 @@ def align_mumap(
         fpet='',
         fcomment='',
         store=False,
+        store_npy=False,
         petopt='ac',
         musrc='ute', # another option is pct for mu-map source
-        ute_name='UTE1',
+        ute_name='UTE2',
+        del_auxilary=True,
+        verbose=True,
     ):
+    '''
+    Align the a pCT or MR-derived mu-map to a PET image reconstructed to chosen
+    specifications (e.g., with/without attenuation and scatter corrections)
 
+    use_sotred only works if hst or t0/t1 given but not when faff.
+    '''
+
+
+    #> output folder
+    if outpath=='':
+        opth = os.path.join( datain['corepath'], 'mumap-obj' )
+    else:
+        opth = os.path.join( outpath, 'mumap-obj' )
+
+    #> create the folder, if not existent
+    nimpa.create_dir(opth)
+
+    #> get the timing of PET if affine not given
+    if faff!='' and 't0' in hst:
+        t0 = hst['t0']
+        t1 = hst['t1']
+
+    #> file name for the output mu-map
+    fnm = 'mumap-' + musrc.upper()
+
+    #> output dictionary
+    mu_dct = {}
+
+    #---------------------------------------------------------------------------
+    #> used stored if requested
+    if use_stored and affine!='':
+        fmu_stored = fnm + '-aligned-to_t'\
+                     + str(hst['t0'])+'-'+str(hst['t1'])+'_'+petopt.upper()\
+                     + fcomment
+        fmupath = os.path.join(opth, fmu_stored)
+        if os.path.isfile( fmupath ):
+            mudct_stored = nimpa.getnii(fmupath, output='all')
+            #> create output dictionary
+            mu_dct['im'] = mudct_stored['im']
+            mu_dct['affine'] = mudct_stored['affine']
+            #mu_dct['faff'] = faff
+            return mu_dct
+    #---------------------------------------------------------------------------
+
+    #> three ways of passing scanner constants <Cnt> are here decoded
+    if 'Cnt' in scanner_params:
+        Cnt = scanner_params['Cnt']
+    elif 'SO_IMZ' in scanner_params:
+        Cnt = scanner_params
+    else:
+        Cnt = rs.get_mmr_constants()
+    Cnt   = scanner_params['Cnt']
+
+    #> if affine not provided histogram the LM data for recon and registration
     if not os.path.isfile(faff):
         from niftypet.nipet.prj import mmrrec
         #-histogram the list data if needed
         if not hst:
             from niftypet.nipet import mmrhist
-            hst = mmrhist(datain, scanner_params, t0=t0, t1=t1)
-
-    #-constants, transaxial and axial LUTs are extracted
-    Cnt   = scanner_params['Cnt']
-    txLUT = scanner_params['txLUT']
-    axLUT = scanner_params['axLUT']
+            if 'txLUT' in scanner_params:
+                hst = mmrhist(datain, scanner_params, t0=t0, t1=t1)
+            else:
+                raise ValueError(
+                    'e> full scanner parameters not provided\
+                     but required for histogramming.')
 
     #=========================================================
     #-get hardware mu-map
     if 'hmumap' in datain and os.path.isfile(datain['hmumap']):
-        muh, _, _ = np.load(datain['hmumap'])
-        if Cnt['VERBOSE']: print 'i> loaded hardware mu-map from file:', datain['hmumap']
+        muh, _, _ = np.load(datain['hmumap'], allow_pickle=True)
+        if verbose: print 'i> loaded hardware mu-map from file:', datain['hmumap']
     elif outpath!='':
         hmupath = os.path.join( os.path.join(outpath,'mumap-hdw'), 'hmumap.npy')
         if os.path.isfile( hmupath ):
-            muh, _, _ = np.load(hmupath)
+            muh, _, _ = np.load(hmupath, allow_pickle=True)
             datain['hmumap'] = hmupath
         else:
             raise IOError('Invalid path to the hardware mu-map')
@@ -453,9 +529,7 @@ def align_mumap(
         raise IOError('T1w image could not be obtained')
     #=========================================================
 
-    #-output dictionary
-    mu_dct = {}
-    #-if the affine is not given, 
+    #-if the affine is not given,
     #-it will be generated by reconstructing PET image, with some or no corrections
     if not os.path.isfile(faff):
         # first recon pet to get the T1 aligned to it
@@ -463,15 +537,18 @@ def align_mumap(
             # ---------------------------------------------
             # OPTION 1 (quantitative recon with all corrections using MR-based mu-map)
             # get UTE object mu-map (may not be in register with the PET data)
-            mudic = obj_mumap(datain, Cnt)
+            mudic = obj_mumap(
+                        datain,
+                        Cnt,
+                        del_auxilary=del_auxilary)
             muo = mudic['im']
             # reconstruct PET image with UTE mu-map to which co-register T1w
-            recout = mmrrec.osemone(   
-                datain, [muh, muo], 
+            recout = mmrrec.osemone(
+                datain, [muh, muo],
                 hst, scanner_params,
                 recmod=3, itr=itr, fwhm=0.,
-                fcomment=fcomment+'_qntUTE',
-                outpath=os.path.join(outpath,'PET'),
+                fcomment=fcomment+'_QNT-UTE',
+                outpath=os.path.join(outpath, 'PET', 'positioning'),
                 store_img=True)
         elif petopt=='nac':
             # ---------------------------------------------
@@ -480,24 +557,28 @@ def align_mumap(
             muo = np.zeros(muh.shape, dtype=muh.dtype)
             recout = mmrrec.osemone(
                 datain, [muh, muo],
-                hst, scanner_params, 
-                recmod=1, itr=itr, fwhm=0., 
+                hst, scanner_params,
+                recmod=1, itr=itr, fwhm=0.,
                 fcomment=fcomment+'_NAC',
-                outpath=os.path.join(outpath,'PET'),
+                outpath=os.path.join(outpath,'PET', 'positioning'),
                 store_img=True)
         elif petopt=='ac':
             # ---------------------------------------------
             # OPTION 3 (recon with attenuation correction only but no scatter)
             # reconstruct PET image with UTE mu-map to which co-register T1w
-            mudic = obj_mumap(datain, Cnt, outpath=outpath)
+            mudic = obj_mumap(
+                    datain,
+                    Cnt,
+                    del_auxilary=del_auxilary)
             muo = mudic['im']
+
             recout = mmrrec.osemone(
                 datain, [muh, muo],
-                hst, scanner_params, 
-                recmod=1, itr=itr, fwhm=0., 
-                fcomment=fcomment+'_AC',
-                outpath=os.path.join(outpath,'PET'),
-                store_img=True)       
+                hst, scanner_params,
+                recmod=1, itr=itr, fwhm=0.,
+                fcomment=fcomment+'_AC-UTE',
+                outpath=os.path.join(outpath,'PET', 'positioning'),
+                store_img=True)
 
         fpet = recout.fpet
         mu_dct['fpet'] = fpet
@@ -511,85 +592,124 @@ def align_mumap(
                 fute = glob.glob(os.path.join(datain[ute_name], fnew+'*nii*'))[0]
             elif os.path.isfile(datain[ute_name]):
                 fute = datain[ute_name]
-            # get the affine transformation
-            faff, _ = nimpa.affine_niftyreg(
-                fpet, fute,
-                outpath=outpath,
-                #fcomment=fcomment,
-                executable = Cnt['REGPATH'],
-                omp = multiprocessing.cpu_count()/2,
-                rigOnly = True,
-                affDirect = False,
-                maxit=5,
-                speed=True,
-                pi=50, pv=50,
-                smof=0, smor=0,
-                rmsk=True,
-                fmsk=True,
-                rfwhm=15., #millilitres
-                rthrsh=0.05,
-                ffwhm = 15., #millilitres
-                fthrsh=0.05,
-                verbose=Cnt['VERBOSE']
-            )
-            os.remove(fute)
-        elif musrc=='pct':
-            faff, _ = nimpa.reg_mr2pet(  
-            fpet, datain, Cnt,
-            rigOnly = True,
-            outpath=outpath,
-            #fcomment=fcomment
-        )
-        else: 
-            raise IOError('Floating MR image not provided or is invalid.')
-        
 
-    #-resampling output
-    if outpath=='':
-        if musrc=='pct':
-            mudir = os.path.dirname(datain['pCT'])
-        elif musrc=='ute':
-            mudir = os.path.dirname(datain['UTE'])
+            # get the affine transformation
+            try:
+                regdct = nimpa.coreg_spm(
+                    fpet,
+                    fute,
+                    outpath=os.path.join(outpath,'PET', 'positioning')
+                )
+            except:
+                regdct = nimpa.affine_niftyreg(
+                    fpet,
+                    fute,
+                    outpath=os.path.join(outpath,'PET', 'positioning'),
+                    #fcomment=fcomment,
+                    executable = Cnt['REGPATH'],
+                    omp = multiprocessing.cpu_count()/2,
+                    rigOnly = True,
+                    affDirect = False,
+                    maxit=5,
+                    speed=True,
+                    pi=50, pv=50,
+                    smof=0, smor=0,
+                    rmsk=True,
+                    fmsk=True,
+                    rfwhm=15., #millilitres
+                    rthrsh=0.05,
+                    ffwhm = 15., #millilitres
+                    fthrsh=0.05,
+                    verbose=verbose
+                )
+
+            faff_mrpet = regdct['faff']
+
+        elif musrc=='pct':
+
+            ft1w = nimpa.pick_t1w(datain)
+
+            try:
+                regdct = nimpa.coreg_spm(
+                    fpet,
+                    ft1w,
+                    outpath=os.path.join(outpath,'PET', 'positioning')
+                )
+            except:
+                regdct = nimpa.affine_niftyreg(
+                    fpet,
+                    ft1w,
+                    outpath=os.path.join(outpath,'PET', 'positioning'),
+                    executable = Cnt['REGPATH'],
+                    omp = multiprocessing.cpu_count()/2,
+                    rigOnly = True,
+                    affDirect = False,
+                    maxit=5,
+                    speed=True,
+                    pi=50, pv=50,
+                    smof=0, smor=0,
+                    rmsk=True,
+                    fmsk=True,
+                    rfwhm=15., #millilitres
+                    rthrsh=0.05,
+                    ffwhm = 15., #millilitres
+                    fthrsh=0.05,
+                    verbose=verbose
+                )
+
+            faff_mrpet = regdct['faff']
+
         else:
-            raise NameError('Non-existent mu-map source selection.')
+            raise IOError('Floating MR image not provided or is invalid.')
+
     else:
-        mudir = os.path.join(outpath, 'mumap-obj')
-    #-create the folder, if not existent
-    nimpa.create_dir(mudir)
-    
-    #-output file name for the aligned pseudo-CT
+        faff_mrpet = faff
+        regdct = {}
+        if not os.path.isfile(fpet):
+            raise IOError('e> the reference PET should be supplied with the affine.')
+
+    #> output file name for the aligned mu-maps
     if musrc=='pct':
-        freg = os.path.join(mudir, 'pCT_r_tmp'+fcomment+'.nii.gz')
+        freg = os.path.join(opth, 'pCT-res-tmp'+fcomment+'.nii.gz')
         fflo = datain['pCT']
+
     elif musrc=='ute':
-        freg = os.path.join(mudir, 'UTE-r-tmp'+fcomment+'.nii.gz')
+        freg = os.path.join(opth, 'UTE-res-tmp'+fcomment+'.nii.gz')
         if 'UTE' not in datain:
-            fnii = 'converted'
+            fnii = 'converted-from-DICOM_'
+            tstmp = nimpa.time_stamp(simple_ascii=True)
             # convert the DICOM mu-map images to nii
-            if 'mumapDCM' not in datain: 
+            if 'mumapDCM' not in datain:
                 raise IOError('DICOM with the UTE mu-map are not given.')
-            call( [ Cnt['DCM2NIIX'], '-f', fnii, datain['mumapDCM'] ] )
+            call( [ Cnt['DCM2NIIX'], '-f', fnii+tstmp, '-o', opth, datain['mumapDCM'] ] )
             #files for the T1w, pick one:
-            fflo = glob.glob( os.path.join(datain['mumapDCM'], '*converted*.nii*') )
-            fflo = fflo[0]
+            fflo = glob.glob( os.path.join(opth, '*'+fnii+tstmp+'*.nii*') )[0]
         else:
             if os.path.isfile(datain['UTE']):
                 fflo = datain['UTE']
             else:
                 raise IOError('The provided NIfTI UTE path is not valid.')
 
-    #-call the resampling routine to get the pCT/UTE in place
-    if os.path.isfile( Cnt['RESPATH'] ):
-        cmd = [Cnt['RESPATH'],
-            '-ref', fpet,
-            '-flo', fflo,
-            '-trans', faff,
-            '-res', freg,
-            '-pad', '0']
-        if not Cnt['VERBOSE']: cmd.append('-voff')
-        call(cmd)
+    #> call the resampling routine to get the pCT/UTE in place
+    if 'matlab_eng' in regdct:
+        nimpa.resample_spm(
+            fpet,
+            fflo,
+            faff_mrpet,
+            matlab_eng=regdct['matlab_eng'],
+            fimout=freg,
+            del_ref_uncmpr=True,
+            del_flo_uncmpr=True,
+            del_out_uncmpr=True
+        )
     else:
-        raise IOError('Wrong executive for resampling.')
+        nimpa.resample_niftyreg(
+            fpet,
+            fflo,
+            faff_mrpet,
+            fimout = freg,
+            executable = Cnt['RESPATH'],
+            verbose = True)
 
 
     #-get the NIfTI of registered image
@@ -602,12 +722,10 @@ def align_mumap(
     #-convert to mu-values; sort out the file name too.
     if musrc=='pct':
         mu = hu2mu(imreg)
-        fname = 'mumapCT'
     elif musrc=='ute':
         mu = np.float32(imreg)/1e4
         #-remove the converted file from DICOMs
         os.remove(fflo)
-        fname = 'mumapUTE'
     else:
         raise NameError('Confused o_O.')
 
@@ -617,22 +735,34 @@ def align_mumap(
     mu_dct['im'] = mu
     mu_dct['affine'] = A
     mu_dct['faff'] = faff
-    
-    if store:
-        # now save to numpy array and NIfTI in this folder
-        if outpath=='':
-            mumapdir = os.path.join( datain['corepath'], 'mumap-obj' )
+
+    if store or store_npy:
+
+        nimpa.create_dir(opth)
+        if faff=='':
+            fname = fnm + '-aligned-to_t'\
+                    + str(hst['t0'])+'-'+str(hst['t1'])+'_'+petopt.upper()\
+                    + fcomment
         else:
-            mumapdir = os.path.join(outpath, 'mumap-obj')
-        nimpa.create_dir(mumapdir)
-        # numpy
-        fnp = os.path.join(mumapdir, fname+'.npy')
-        np.save(fnp, (mu, A, fnp))
-        # NIfTI
-        fmu = os.path.join(mumapdir, fname +fcomment+ '.nii.gz')
+            fname = fnm + '-aligned-to-given-affine' + fcomment
+
+    if store_npy:
+        #> Numpy
+        if store_to_npy:
+            fnp = os.path.join(opth, fname + '.npy')
+            np.save(fnp, (mu, A, fnp))
+
+
+    if store:
+        #> NIfTI
+        fmu = os.path.join(opth, fname + '.nii.gz')
         nimpa.array2nii(mu[::-1,::-1,:], A, fmu)
         mu_dct['fim'] = fmu
-        datain[fname] = fnp
+
+    if del_auxilary:
+        os.remove(freg)
+        if not os.path.isfile(faff):
+            os.remove(fute)
 
     return mu_dct
 
@@ -642,16 +772,22 @@ def align_mumap(
 #---------------------------------------------------------------------------------
 def pct_mumap(
         datain, scanner_params,
-        hst=[], t0=0, t1=0, itr=2,
-        faff='', fpet='', fcomment='', outpath='',
-        store=False, petopt='ac',
-        #smor=0.0, smof=0.0, rthrsh=0.05, fthrsh=0.05
-        ):
-        
+        hst=[], t0=0, t1=0,
+        itr=2,
+        petopt='ac',
+        faff='',
+        fpet='',
+        fcomment='',
+        outpath='',
+        store_npy = False,
+        store = False,
+        verbose=True
+    ):
+
     '''
     GET THE MU-MAP from pCT IMAGE (which is in T1w space)
     * the mu-map will be registered to PET which will be reconstructed for time frame t0-t1
-    * it f0 and t1 are not given the whole LM dataset will be reconstructed 
+    * it f0 and t1 are not given the whole LM dataset will be reconstructed
     * the reconstructed PET can be attenuation and scatter corrected or NOT using petopt
     '''
 
@@ -661,7 +797,7 @@ def pct_mumap(
         if not hst:
             from niftypet.nipet.lm import mmrhist
             hst = mmrhist.mmrhist(datain, scanner_params, t0=t0, t1=t1)
-        
+
     # constants, transaxial and axial LUTs are extracted
     Cnt   = scanner_params['Cnt']
     txLUT = scanner_params['txLUT']
@@ -669,12 +805,13 @@ def pct_mumap(
 
     # get hardware mu-map
     if 'hmumap' in datain and os.path.isfile(datain['hmumap']):
-        muh, _, _ = np.load(datain['hmumap'])
-        if Cnt['VERBOSE']: print 'i> loaded hardware mu-map from file:', datain['hmumap']
+        muh, _, _ = np.load(datain['hmumap'], allow_pickle=True)
+        if verbose:
+            print 'i> loaded hardware mu-map from file:', datain['hmumap']
     elif outpath!='':
         hmupath = os.path.join( os.path.join(outpath,'mumap-hdw'), 'hmumap.npy')
         if os.path.isfile( hmupath ):
-            muh, _, _ = np.load(hmupath)
+            muh, _, _ = np.load(hmupath, allow_pickle=True)
             datain['hmumap'] = hmupath
         else:
             raise IOError('Invalid path to the hardware mu-map')
@@ -698,12 +835,12 @@ def pct_mumap(
             mudic = obj_mumap(datain, Cnt)
             muo = mudic['im']
             # reconstruct PET image with UTE mu-map to which co-register T1w
-            recout = mmrrec.osemone(   
-                datain, [muh, muo], 
+            recout = mmrrec.osemone(
+                datain, [muh, muo],
                 hst, scanner_params,
                 recmod=3, itr=itr, fwhm=0.,
                 fcomment=fcomment+'_qntUTE',
-                outpath=os.path.join(outpath,'PET'),
+                outpath=os.path.join(outpath, 'PET', 'positioning'),
                 store_img=True)
         elif petopt=='nac':
             # ---------------------------------------------
@@ -712,10 +849,10 @@ def pct_mumap(
             muo = np.zeros(muh.shape, dtype=muh.dtype)
             recout = mmrrec.osemone(
                 datain, [muh, muo],
-                hst, scanner_params, 
-                recmod=1, itr=itr, fwhm=0., 
+                hst, scanner_params,
+                recmod=1, itr=itr, fwhm=0.,
                 fcomment=fcomment+'_NAC',
-                outpath=os.path.join(outpath,'PET'),
+                outpath=os.path.join(outpath, 'PET', 'positioning'),
                 store_img=True)
         elif petopt=='ac':
             # ---------------------------------------------
@@ -725,22 +862,49 @@ def pct_mumap(
             muo = mudic['im']
             recout = mmrrec.osemone(
                 datain, [muh, muo],
-                hst, scanner_params, 
-                recmod=1, itr=itr, fwhm=0., 
+                hst, scanner_params,
+                recmod=1, itr=itr, fwhm=0.,
                 fcomment=fcomment+'_AC',
-                outpath=os.path.join(outpath,'PET'),
-                store_img=True)       
+                outpath=os.path.join(outpath, 'PET', 'positioning'),
+                store_img=True)
 
         fpet = recout.fpet
         mu_dct['fpet'] = fpet
+
         #------------------------------
         # get the affine transformation
-        faff, _ = nimpa.reg_mr2pet(  
-                fpet, datain, Cnt,
+
+        ft1w = nimpa.pick_t1w(datain)
+        try:
+            regdct = nimpa.coreg_spm(
+                fpet,
+                ft1w,
+                outpath=os.path.join(outpath,'PET', 'positioning')
+            )
+        except:
+            regdct = nimpa.affine_niftyreg(
+                fpet,
+                ft1w,
+                outpath=os.path.join(outpath,'PET', 'positioning'),
+                #fcomment=fcomment,
+                executable = Cnt['REGPATH'],
+                omp = multiprocessing.cpu_count()/2,
                 rigOnly = True,
-                outpath=outpath,
-                #fcomment=fcomment
-        )
+                affDirect = False,
+                maxit=5,
+                speed=True,
+                pi=50, pv=50,
+                smof=0, smor=0,
+                rmsk=True,
+                fmsk=True,
+                rfwhm=15., #millilitres
+                rthrsh=0.05,
+                ffwhm = 15., #millilitres
+                fthrsh=0.05,
+                verbose=verbose
+            )
+
+        faff = regdct['faff']
         #------------------------------
 
     # pCT file name
@@ -759,7 +923,7 @@ def pct_mumap(
             '-trans', faff,
             '-res', fpct,
             '-pad', '0']
-        if not Cnt['VERBOSE']: cmd.append('-voff')
+        if not verbose: cmd.append('-voff')
         call(cmd)
     else:
         print 'e> path to resampling executable is incorrect!'
@@ -776,7 +940,7 @@ def pct_mumap(
     mu = hu2mu(pct)
     # get rid of negatives
     mu[mu<0] = 0
-    
+
     # return image dictionary with the image itself and other parameters
     mu_dct['im'] = mu
     mu_dct['affine'] = A
@@ -789,14 +953,20 @@ def pct_mumap(
         else:
             pctumapdir = os.path.join(outpath, 'mumap-obj')
         mmraux.create_dir(pctumapdir)
+
+        #> Numpy
+        if store_npy:
+            fnp = os.path.join(pctumapdir, 'mumap-pCT.npy')
+            np.save(fnp, (mu, A, fnp))
+
+
         # numpy
-        fnp = os.path.join(pctumapdir, 'mumap-pCT.npy')
-        np.save(fnp, (mu, A, fnp))
+
         # NIfTI
         fmu = os.path.join(pctumapdir, 'mumap-pCT' +fcomment+ '.nii.gz')
         nimpa.array2nii(mu[::-1,::-1,:], A, fmu)
         mu_dct['fim'] = fmu
-        datain['mumapCT'] = fnp
+        datain['mumapCT'] = fmu
 
     return mu_dct
 
@@ -930,7 +1100,7 @@ def rd_hmu(fh):
     im = np.fromfile(f, np.float32)
     f.close()
     #-----------------
-    return  hdr, im 
+    return  hdr, im
 
 
 def get_hmupos(datain, parts, Cnt, outpath=''):
@@ -981,7 +1151,7 @@ def get_hmupos(datain, parts, Cnt, outpath=''):
 
     ## ----
     ## old I: only worked for syngo MR B20P
-    # fi = csamu.find('GantryTableHomeOffset') 
+    # fi = csamu.find('GantryTableHomeOffset')
     # gtostr =csamu[fi:fi+300]
     # if dhdr[0x0018, 0x1020].value == 'syngo MR B20P':
     #     gto = re.sub(r'[^a-zA-Z0-9\-\.]', '', gtostr).split('M')
@@ -1051,7 +1221,7 @@ def get_hmupos(datain, parts, Cnt, outpath=''):
     # iteratively go through the mu-maps and add them as needed
     for i in parts:
         fh = os.path.join(Cnt['HMUDIR'], Cnt['HMULIST'][i-1])
-        # get the interfile header and binary data 
+        # get the interfile header and binary data
         hdr, im = rd_hmu(fh)
         #get shape, origin, offset and voxel size
         s = hmu_shape(hdr)
@@ -1091,16 +1261,16 @@ def get_hmupos(datain, parts, Cnt, outpath=''):
                 '-pad', '0']
         if not Cnt['VERBOSE']: cmd.append('-voff')
         call(cmd)
-                
+
     return hmupos
 
 
 #-------------------------------------------------------------------------------------
 def hdw_mumap(
-        datain, 
-        hparts, 
-        params, 
-        outpath='', 
+        datain,
+        hparts,
+        params,
+        outpath='',
         use_stored=False,
         del_interm=True):
     ''' Get hardware mu-map components, including bed, coils etc.
@@ -1126,13 +1296,13 @@ def hdw_mumap(
             A = dct['affine']
             fmu = datain['hmumap']
         elif datain['hmumap'].endswith(('.npy')):
-            hmu, A, fmu = np.load(datain['hmumap'])
+            hmu, A, fmu = np.load(datain['hmumap'], allow_pickle=True)
             if Cnt['VERBOSE']: print 'i> loaded hardware mu-map from file:', datain['hmumap']
             fnp = datain['hmumap']
 
     elif outpath!='' and os.path.isfile(os.path.join(fmudir, 'hmumap.npy')):
         fnp = os.path.join(fmudir, 'hmumap.npy')
-        hmu, A, fmu = np.load(fnp)
+        hmu, A, fmu = np.load(fnp, allow_pickle=True)
         datain['hmumap'] = fnp
     # otherwise generate it from the parts through resampling the high resolution CT images
     else:
@@ -1149,7 +1319,7 @@ def hdw_mumap(
             nim = nib.load(fin)
             mu = nim.get_data()
             mu[mu<0] = 0
-            
+
             imo += mu
 
         hdr = nimo.header
@@ -1174,7 +1344,7 @@ def hdw_mumap(
 
     #return image dictionary with the image itself and some other stats
     hmu_dct = { 'im':hmu,
-                'fim':fmu,                
+                'fim':fmu,
                 'affine':A}
     if 'fnp' in locals():
         hmu_dct['fnp'] = fnp
@@ -1194,7 +1364,7 @@ def rmumaps(datain, Cnt, t0=0, t1=0, use_stored=False):
 
     # get hardware mu-map
     if os.path.isfile(datain['hmumap']) and use_stored:
-        muh, _ = np.load(datain['hmumap'])
+        muh, _ = np.load(datain['hmumap'], allow_pickle=True)
         if Cnt['VERBOSE']: print 'i> loaded hardware mu-map from file:', datain['hmumap']
     else:
         hmudic = hdw_mumap(datain, [1,2,4], Cnt)
@@ -1202,14 +1372,14 @@ def rmumaps(datain, Cnt, t0=0, t1=0, use_stored=False):
 
     # get pCT mu-map if stored in numpy file and then exit, otherwise do all the processing
     if os.path.isfile(datain['mumapCT']) and use_stored:
-        mup, _ = np.load(datain['mumapCT'])
+        mup, _ = np.load(datain['mumapCT'], allow_pickle=True)
         muh = muh[2*Cnt['RNG_STRT'] : 2*Cnt['RNG_END'], :, :]
         mup = mup[2*Cnt['RNG_STRT'] : 2*Cnt['RNG_END'], :, :]
         return [muh, mup]
 
     # get UTE object mu-map (may be not in register with the PET data)
     if os.path.isfile(datain['mumapUTE']) and use_stored:
-        muo, _ = np.load(datain['mumapUTE'])
+        muo, _ = np.load(datain['mumapUTE'], allow_pickle=True)
     else:
         mudic = obj_mumap(datain, Cnt, store=True)
         muo = mudic['im']
@@ -1220,12 +1390,12 @@ def rmumaps(datain, Cnt, t0=0, t1=0, use_stored=False):
         Cnt_ = params['Cnt']
         txLUT_ = params['txLUT']
         axLUT_ = params['axLUT']
-        
+
         # histogram for reconstruction with UTE mu-map
         hst = mmrhist.hist(datain, txLUT_, axLUT_, Cnt_, t0=t0, t1=t1)
         # reconstruct PET image with UTE mu-map to which co-register T1w
         recute = mmrrec.osemone(
-            datain, [muh, muo], hst, params, 
+            datain, [muh, muo], hst, params,
             recmod=3, itr=4, fwhm=0., store_img=True, fcomment=fcomment+'_QNT-UTE'
         )
         # --- MR T1w

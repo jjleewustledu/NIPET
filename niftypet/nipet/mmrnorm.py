@@ -59,17 +59,17 @@ def get_components(datain, Cnt):
     #the files below are found based on a 24hr scan of germanium-68 phantom
     # axial effects for span-1
     fnm = 'AxialFactorForSpan1.npy'
-    fpth = os.path.join(resource_filename('niftypet', 'auxdata'), fnm)
+    fpth = os.path.join(resource_filename(__name__, '../auxdata'), fnm)#'niftypet'
     ax_f1 = np.load(fpth)
     # relative scale factors for axial scatter deriving span-11 scale factors from SSR scale factors
     fnm = 'RelativeScaleFactors_scatter_axial_ssrTOspan11.f32'
-    fpth = os.path.join(resource_filename('niftypet', 'auxdata'), fnm)
+    fpth = os.path.join(resource_filename(__name__, '../auxdata'), fnm)
     f = open(fpth, 'rb')
     sax_f11 = np.fromfile(f, np.float32, Cnt['NSN11'])
     f.close()
     # relative scale factors for axial scatter deriving span-1 scale factors from SSR scale factors
     fnm = 'RelativeScaleFactors_scatter_axial_ssrTOspan1.f32'
-    fpth = os.path.join(resource_filename('niftypet', 'auxdata'), fnm)
+    fpth = os.path.join(resource_filename(__name__, '../auxdata'), fnm)
     f = open(fpth, 'rb')
     sax_f1 = np.fromfile(f, np.float32, Cnt['NSN1'])
     f.close()
@@ -139,6 +139,31 @@ def get_sinog(datain, hst, axLUT, txLUT, Cnt, normcomp=None):
 
 def get_sino(datain, hst, axLUT, txLUT, Cnt):
 
+    #number of sino planes (2D sinos) depends on the span used
+    if Cnt['SPN']==1:
+        nsinos = Cnt['NSN1']
+    elif Cnt['SPN']==11:
+        nsinos = Cnt['NSN11']
+
+    #get sino with no gaps
+    s = get_sinog(datain, hst, axLUT, txLUT, Cnt)
+    #preallocate sino with gaps
+    sino = np.zeros((Cnt['NSANGLES'], Cnt['NSBINS'], nsinos), dtype=np.float32)
+    #fill the sino with gaps
+    mmr_auxe.pgaps(sino, s, txLUT, Cnt)
+    sino = np.transpose(sino, (2,0,1))
+
+    return sino
+
+def get_norm_sino(datain, scanner_params, hst):
+
+    Cnt = scanner_params['Cnt']
+    txLUT = scanner_params['txLUT']
+    axLUT = scanner_params['axLUT']
+
+    # if not hst:
+    #     hst = mmrhist.mmrhist(datain, scanner_params)
+        
     #number of sino planes (2D sinos) depends on the span used
     if Cnt['SPN']==1:
         nsinos = Cnt['NSN1']

@@ -109,8 +109,9 @@ def hdr_lm(datain, Cnt):
             lmhdr = dhdr[0x29,0x1010].value
             if Cnt['VERBOSE']: print 'i> got LM interfile.'
         else:
-            print 'e> DICOM field [0x29,0x1010] not found!'
-            return None, None
+            print 'w> DICOM field [0x29,0x1010] not found!'
+            lmhdr = None
+
         #CSA Series Header Info
         if [0x29,0x1120] in dhdr:
             csahdr = dhdr[0x29,0x1120].value
@@ -118,8 +119,10 @@ def hdr_lm(datain, Cnt):
         else:
             print 'e> DICOM field [0x29,0x1120] not found!'
             return lmhdr, None
+    
     # for older scanner software
     elif dhdr[0x0018, 0x1020].value == 'syngo MR B18P':
+        
         # find interfile header
         found_lmhdr = False
         for loc in lmhdr_locations:
@@ -130,8 +133,9 @@ def hdr_lm(datain, Cnt):
                     found_lmhdr = True
                     break
         if not found_lmhdr:            
-            print 'e> DICOM field with LM interfile header has not been found!'
-            return None, None
+            print 'w> DICOM field with LM interfile header has not been found!'
+            lmhdr = None
+        
         #CSA Series Header Info
         if [0x29,0x1020] in dhdr:
             csahdr = dhdr[0x29,0x1020].value
@@ -702,9 +706,9 @@ def get_npfiles(dfile, datain, v):
         datain['mumapCT'] = dfile
         if v: print 'mu-map for the object.'
 
-    # UTE/Dixon mu-map
-    if os.path.basename(dfile)=='mumap_UTE.npy':
-        datain['mumapUTE'] = dfile
+    # DICOM UTE/Dixon mu-map
+    if os.path.basename(dfile)=='mumap-from-DICOM.npy':
+        datain['mumapNPY'] = dfile
         if v: print 'mu-map for the object.'
 
     if os.path.basename(dfile)=='hmumap.npy':
@@ -725,11 +729,19 @@ def get_niifiles(dfile, datain, v):
         print '--------------------------------------------------------------------------'
         print 'i> file:', dfile
 
-    #NIfTI file of pseudo CT
+
+    #> NIfTI file of converted MR-based mu-map from DICOMs
+    if os.path.basename(dfile).split('.nii')[0]=='mumap-from-DICOM':
+        datain['mumapNII'] = dfile
+        if v: print 'mu-map for the object.'
+
+
+    #> NIfTI file of pseudo CT
     fpct = glob.glob( os.path.join(os.path.dirname(dfile), '*_synth.nii*') )
     if len(fpct)>0:
         datain['pCT'] = fpct[0]
         if v: print 'i> pseudoCT of the object.'
+
     fpct = glob.glob( os.path.join(os.path.dirname(dfile), '*_p[cC][tT].nii*') )
     if len(fpct)>0:
         datain['pCT'] = fpct[0]
@@ -787,7 +799,7 @@ def get_niifiles(dfile, datain, v):
     if len(flbl)==1:
         datain['T1lbl'] = flbl[0]
         if v: print 'i> NIfTI for regional parcellations of the object:', flbl[0]
-    flbl = glob.glob( os.path.join(os.path.dirname(dfile), '*[tT]1*Parcellation.nii*') )
+    flbl = glob.glob( os.path.join(os.path.dirname(dfile), '*[tT]1*[Pp]arcellation.nii*') )
     if len(flbl)==1:
         datain['T1lbl'] = flbl[0]
         if v: print 'i> NIfTI for regional parcellations of the object:', flbl[0]
@@ -813,7 +825,7 @@ def get_dicoms(dfile, datain, Cnt):
         print '--------------------------------------------------------------------------'
         print 'i> file:', dfile
 
-    d = dcm.read_file(dfile)
+    d = dcm.dcmread(dfile)
     dcmtype = nimpa.dcminfo(d, verbose=Cnt['VERBOSE'])
 
     #> check if it is norm file
@@ -868,8 +880,14 @@ def get_dicoms(dfile, datain, Cnt):
                 return None
         
         #> get info about the PET tracer being used
-        lmhdr, _ = hdr_lm(datain, Cnt)
-        f0 = lmhdr.find('isotope name')
+        lmhdr, csahdr = hdr_lm(datain, Cnt)
+
+        #> if there is interfile header get the info from there
+        if lmhdr!=None:
+            f0 = lmhdr.find('isotope name')
+        else:
+            f0 = -1
+        
         if f0>=0:
             f1 = f0+lmhdr[f0:].find('\n')
             #regular expression for the isotope symbol
@@ -878,8 +896,9 @@ def get_dicoms(dfile, datain, Cnt):
             istp = p.findall(lmhdr[f0:f1])[0]
             istp = istp.replace('-', '')
             Cnt['ISOTOPE'] = istp.strip()
+
+        #> if no info in interfile header than look in the CSA header
         else:
-            _, csahdr = hdr_lm(datain, Cnt)
             f0 = csahdr.find('RadionuclideCodeSequence')
             if f0<0: 
                 print 'w> could not find isotope name.  enter manually into Cnt[''ISOTOPE'']'
@@ -912,11 +931,11 @@ def get_dicoms(dfile, datain, Cnt):
             datain['#T1DCM'] += 1
 
     elif 'mr' in dcmtype and 't2' in dcmtype:
-        datain['T2dcm'] = os.path.dirname(dfile)
-        if '#T2dcm' not in datain:
-            datain['#T2dcm'] = 1
+        datain['T2DCM'] = os.path.dirname(dfile)
+        if '#T2DCM' not in datain:
+            datain['#T2DCM'] = 1
         else:
-            datain['#T2dcm'] += 1
+            datain['#T2DCM'] += 1
 
     # UTE's two sequences:
     elif 'mr' in dcmtype and 'ute2' in dcmtype:

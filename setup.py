@@ -156,7 +156,7 @@ if platform.system()=='Windows':
 # error string for later reporting
 errstr = []
 # the log files the cmake results are written
-cmakelog = ['py_cmake_config.log', 'py_cmake_build.log'] 
+cmakelog = ['py_cmake_config.log', 'py_cmake_build.log']
 # run commands with logging
 for ci in range(len(cmd)):
     with open(cmakelog[ci], 'w') as f:
@@ -209,27 +209,28 @@ with open('README.rst') as file:
 #---- for setup logging -----
 stdout = sys.stdout
 stderr = sys.stderr
-log_file = open('setup_nimpa.log', 'w')
+log_file = open('setup_nipet.log', 'w')
 sys.stdout = log_file
 sys.stderr = log_file
 #----------------------------
 
 if platform.system() == 'Linux' :
     fex = '*.so'
-elif platform.system() == 'Windows' : 
+elif platform.system() == 'Windows' :
     fex = '*.pyd'
 #----------------------------
 setup(
     name='nipet',
     license = 'Apache 2.0',
-    version='1.1.8',
+    version='1.1.17',
     description='CUDA-accelerated Python utilities for high-throughput PET/MR image reconstruction and analysis.',
     long_description=long_description,
     author='Pawel J. Markiewicz',
     author_email='p.markiewicz@ucl.ac.uk',
     url='https://github.com/pjmark/NiftyPET',
     keywords='PET image reconstruction and analysis',
-    install_requires=['nimpa>=1.1.0', 'pydicom>=1.0.2,<1.3.0', 'nibabel>=2.2.1, <2.4.0'],
+    install_requires=['nimpa>=1.1.0', 'pydicom>=1.0.2,<=1.2.2',
+      'nibabel>=2.2.1, <=2.3.1', 'tqdm>=4.27'],
     packages=find_packages(exclude=['docs']),
     package_data={
         'niftypet': ['auxdata/*'],
