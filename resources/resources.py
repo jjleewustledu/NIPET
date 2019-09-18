@@ -233,8 +233,11 @@ COSUPSMX = 0.725 #0.58 #0.722 #Elow = E511/(2-cos(upsmx))
 COSSTP = (1-COSUPSMX)/(NCOS-1)
 #inverse of the step
 ICOSSTP = 1/COSSTP
-
-# intensity percentage threshold of voxels to be considered in the image
+#bool for gas tracers that accumulate on mirror, creating scattering artefact
+GAS = True
+#fraction of field-of-view to be excluded from field-of-view
+VOIDFRAC = 0.2442
+#intensity percentage threshold of voxels to be considered in the image
 ETHRLD = 0.05
 
 #=================================================================================================
@@ -348,6 +351,8 @@ def get_mmr_constants():
         'NCOS':NCOS, #number of cos samples for LUT
         'COSSTP':COSSTP, #cosine step
         'ICOSSTP':ICOSSTP, #inverse of cosine step
+        'GAS':GAS, #gas tracer
+        'VOIDFRAC':VOIDFRAC, #frac of field-of-view to exclude
         'ETHRLD':ETHRLD, #intensity emission image threshold (used in scatter modelling)
         'CLGHT':CLGHT, #speed of light [cm/s]
         'CWND':CWND,    #coincidence time window [ps]
