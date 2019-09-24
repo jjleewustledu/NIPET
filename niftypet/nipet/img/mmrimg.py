@@ -1042,19 +1042,35 @@ def hmu_voxsize(hdr):
 
 def hmu_origin(hdr):
     #regular expression to find the origin
-    p = re.compile(r'(?<=:=)\s*\d{1,5}[.]\d{1,10}')
-    # x: dim [1]
-    i0 = hdr.find('$umap origin (pixels) [1]')
-    i1 = i0+hdr[i0:].find('\n')
-    x = float(p.findall(hdr[i0:i1])[0])
-    # x: dim [2]
-    i0 = hdr.find('$umap origin (pixels) [2]')
-    i1 = i0+hdr[i0:].find('\n')
-    y = float(p.findall(hdr[i0:i1])[0])
-    # x: dim [3]
-    i0 = hdr.find('$umap origin (pixels) [3]')
-    i1 = i0+hdr[i0:].find('\n')
-    z = -float(p.findall(hdr[i0:i1])[0])
+
+    try:
+        p = re.compile(r'(?<=:=)\s*\d{1,5}[.]\d{1,10}')
+        # x: dim [1]
+        i0 = hdr.find('$umap origin (pixels) [1]')
+        i1 = i0+hdr[i0:].find('\n')
+        x = float(p.findall(hdr[i0:i1])[0])
+        # x: dim [2]
+        i0 = hdr.find('$umap origin (pixels) [2]')
+        i1 = i0+hdr[i0:].find('\n')
+        y = float(p.findall(hdr[i0:i1])[0])
+        # x: dim [3]
+        i0 = hdr.find('$umap origin (pixels) [3]')
+        i1 = i0+hdr[i0:].find('\n')
+        z = -float(p.findall(hdr[i0:i1])[0])
+    except IndexError:
+        p = re.compile(r'(?<=:=)\s*\d{1,5}')
+        # x: dim [1]
+        i0 = hdr.find('$umap origin (pixels) [1]')
+        i1 = i0 + hdr[i0:].find('\n')
+        x = float(p.findall(hdr[i0:i1])[0])
+        # x: dim [2]
+        i0 = hdr.find('$umap origin (pixels) [2]')
+        i1 = i0 + hdr[i0:].find('\n')
+        y = float(p.findall(hdr[i0:i1])[0])
+        # x: dim [3]
+        i0 = hdr.find('$umap origin (pixels) [3]')
+        i1 = i0 + hdr[i0:].find('\n')
+        z = -float(p.findall(hdr[i0:i1])[0])
     return np.array([z, y, x])
 
 def hmu_offset(hdr):
@@ -1202,7 +1218,7 @@ def get_hmupos(datain, parts, Cnt, outpath=''):
     nimpa.array2nii(  np.zeros((Cnt['SO_IMZ'], Cnt['SO_IMY'], Cnt['SO_IMX']), dtype=np.float32), B, fref)
 
     #define a dictionary of all positions/offsets of hardware mu-maps
-    hmupos = [None]*5
+    hmupos = [None]*7
     hmupos[0] = {
         'TabPosOrg' :   tpozyx, #from DICOM of LM file
         'GanTabOff' :   gtozyx, #from DICOM of mMR mu-map file
