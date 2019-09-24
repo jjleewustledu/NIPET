@@ -365,7 +365,7 @@ def vsm(
         msk = np.float32(em_sctonly>0.07*np.max(em_sctonly))
         msk = ndi.filters.gaussian_filter(msk, fwhm2sig(.6, Cnt), mode='mirror')
         msk = np.float32(msk>0.01)
-        msksn = mmrprj.frwd_prj(msk, txLUT, axLUT, Cnt)
+        msksn = mmrprj.frwd_prj(msk, scanner_params)
 
         mssr = mmraux.sino2ssr(msksn, axLUT, Cnt)
         mssr = mssr>0

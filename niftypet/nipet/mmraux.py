@@ -806,6 +806,8 @@ def get_niifiles(dfile, datain):
     if len(fpct)>0:
         datain['em_nocrr'] = fpct[0]
         log.debug('pseudoCT of the object.')
+    else:
+        datain['em_nocrr'] = os.path.join(os.path.dirname(dfile), 'new__ACbed.nii.gz')
 
     #reconstructed emission data with corrections, minimum 3 osem iter
     fpct = glob.glob( os.path.join(os.path.dirname(dfile), '*QNT*.nii*') )
