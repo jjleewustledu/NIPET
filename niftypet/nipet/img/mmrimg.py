@@ -42,7 +42,7 @@ def convert2e7(img, Cnt):
 
     if Cnt['GAS']:
         ylen = int(np.floor(Cnt['VOIDFRAC']*Cnt['SO_IMY']))
-        yrng = np.arange(0, np.ceil(Cnt['VOIDFRAC']*Cnt['SO_IMY']), dtype=int)
+        yrng = np.arange(0, np.floor(Cnt['VOIDFRAC']*Cnt['SO_IMY']), dtype=int)
         img[yrng,:,:] = np.zeros((ylen, Cnt['SZ_IMX'], Cnt['SZ_IMZ']), dtype=np.float32)
     
     margin = (Cnt['SO_IMX']-Cnt['SZ_IMX'])/2

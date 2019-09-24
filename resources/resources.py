@@ -236,7 +236,7 @@ ICOSSTP = 1/COSSTP
 #bool for gas tracers that accumulate on mirror, creating scattering artefact
 GAS = True
 #fraction of field-of-view to be excluded from field-of-view
-VOIDFRAC = 0.2442
+VOIDFRAC = 0.2791
 #intensity percentage threshold of voxels to be considered in the image
 ETHRLD = 0.05
 
