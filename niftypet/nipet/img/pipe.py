@@ -322,6 +322,7 @@ def mmrchain(datain,        # all input data in a dictionary
                                 fcomment=fcomment+'_i',
                                 store_img=store_img_intrmd,
                                 store_itr=store_itr,
+                                emmskS=Cnt['EMMSKS'],
                                 ret_sinos=ret_sinos)
         # form dynamic numpy array
         dynim[ifrm,:,:,:] = recimg.im

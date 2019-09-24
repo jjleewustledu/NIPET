@@ -296,10 +296,10 @@ static PyObject *mmr_scat(PyObject *self, PyObject *args) {
 	muIMG.n10mx = 0;
 	emIMG.n10mx = 0;
 	for (int i = 0; i<muIMG.nvx; i++)
-		if (mumap[i]>0.1*mumx) muIMG.n10mx += 1;
+		if (mumap[i]>2*Cnt.ETHRLD*mumx) muIMG.n10mx += 1;
 
 	for (int i = 0; i<emIMG.nvx; i++)
-		if (emimg[i]>0.1*emmx) emIMG.n10mx += 1;
+		if (emimg[i]>2*Cnt.ETHRLD*emmx) emIMG.n10mx += 1;
 
 	if (Cnt.VERBOSE == 1) printf("i> mumx = %f, mumin = %f, emmx = %f, emmn = %f\n", mumx, mumn, emmx, emmn);
 

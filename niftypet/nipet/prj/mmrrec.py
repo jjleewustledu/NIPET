@@ -219,7 +219,7 @@ def osemone(datain, mumaps, hst, scanner_params,
                 hst,
                 rsino,
                 scanner_params,
-                prcnt_scl=0.1,
+                prcnt_scl=2*Cnt['ETHRLD'],
                 emmsk=False)
             ssng = mmraux.remgaps(ssn, txLUT, Cnt)
         else:

@@ -34,17 +34,10 @@ import resources as rs
 
 def convert2e7(img, Cnt):
     """ Convert GPU optimised image to Siemens/E7 image.
-    :param img:  has shape (344,344,172) for (y,x,z)
-    :param Cnt['GAS']:  bool for gas tracers that accumulate on mirror, creating scattering artefact
-    :param Cnt['VOIDFRAC']:  fraction of field-of-view to be excluded from field-of-view
+    :param img:  has shape (344,344,172) for (y,x,z)+
     :return imo:  has shape (127,344,344) for (z,y,x)
     """
 
-    if Cnt['GAS']:
-        ylen = int(np.floor(Cnt['VOIDFRAC']*Cnt['SO_IMY']))
-        yrng = np.arange(0, np.ceil(Cnt['VOIDFRAC']*Cnt['SO_IMY']), dtype=int)
-        img[yrng,:,:] = np.zeros((ylen, Cnt['SZ_IMX'], Cnt['SZ_IMZ']), dtype=np.float32)
-    
     margin = (Cnt['SO_IMX']-Cnt['SZ_IMX'])/2
 
     #permute the dims first
@@ -194,7 +187,7 @@ def getinterfile_off(fmu, Cnt, Offst=np.array([0., 0., 0.])):
     mumax = np.max(mur)
     mumin = np.min(mur)
     #number of voxels greater than 10% of max image value
-    n10mx = np.sum(mur>0.1*mumax)
+    n10mx = np.sum(mur>2*Cnt['ETHRLD']*mumax)
     #return image dictionary with the image itself and some other stats
     mu_dct = {'im':mur,
               'ims':murs,
@@ -223,7 +216,7 @@ def getinterfile(fim, Cnt):
     immin = np.min(im)
 
     #number of voxels greater than 10% of max image value
-    n10mx = np.sum(im>0.1*immax)
+    n10mx = np.sum(im>2*Cnt['ETHRLD']*immax)
 
     #reorganise the image for optimal gpu execution
     im_sqzd = convert2dev(im, Cnt)
@@ -244,8 +237,6 @@ def getinterfile(fim, Cnt):
 #-define uniform cylinder
 def get_cylinder(Cnt, rad=25, xo=0, yo=0, unival=1, gpu_dim=False):
     """
-    :param Cnt['GAS']:  bool for gas tracers that accumulate on mirror, creating scattering artefact
-    :param Cnt['VOIDFRAC']:  fraction of field-of-view to be excluded from cylinder
     :param rad:  cylinder radius
     :param x0:   coord of transaxial centre
     :param y0:   coord of transaxial centre
@@ -255,25 +246,14 @@ def get_cylinder(Cnt, rad=25, xo=0, yo=0, unival=1, gpu_dim=False):
     """
     
     imdsk = np.zeros((1, Cnt['SO_IMX'], Cnt['SO_IMY']), dtype=np.float32)
-    if Cnt['GAS']:
-        iyedge = (1 - 2*Cnt['VOIDFRAC'])*rad # void volume occupies iyedge < iyf
-        for t in np.arange(0, math.pi, math.pi/(2*360)):
-            x = xo+rad*math.cos(t)
-            y = yo+rad*math.sin(t)        
-            for iyf in np.arange(-y+2*yo, y, Cnt['SO_VXY']/2):
-                if iyf < iyedge:
-                    v = np.int32(.5*Cnt['SO_IMX'] - np.ceil(iyf/Cnt['SO_VXY']))
-                    u = np.int32(.5*Cnt['SO_IMY'] + np.floor(x/Cnt['SO_VXY']))
-                    imdsk[0,v,u] = unival
-    else:
-        for t in np.arange(0, math.pi, math.pi/(2*360)):
-            x = xo+rad*math.cos(t)
-            y = yo+rad*math.sin(t)        
-        
-            yf = np.arange(-y+2*yo, y, Cnt['SO_VXY']/2)
-            v = np.int32(.5*Cnt['SO_IMX'] - np.ceil(yf/Cnt['SO_VXY']))
-            u = np.int32(.5*Cnt['SO_IMY'] + np.floor(x/Cnt['SO_VXY']))
-            imdsk[0,v,u] = unival        
+    for t in np.arange(0, math.pi, math.pi/(2*360)):
+        x = xo+rad*math.cos(t)
+        y = yo+rad*math.sin(t)
+
+        yf = np.arange(-y+2*yo, y, Cnt['SO_VXY']/2)
+        v = np.int32(.5*Cnt['SO_IMX'] - np.ceil(yf/Cnt['SO_VXY']))
+        u = np.int32(.5*Cnt['SO_IMY'] + np.floor(x/Cnt['SO_VXY']))
+        imdsk[0,v,u] = unival
     if 'rSO_IMZ' in Cnt:
         nvz = Cnt['rSO_IMZ']
     else:

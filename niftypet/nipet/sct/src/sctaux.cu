@@ -570,24 +570,9 @@ iMSK get_imskEm(IMflt imvol, float thrshld, Cnst Cnt)
 	iMSK msk;
 	int nvx = 0;
 
-	if (Cnt.GAS == 1) {
-	  iyedge = (int) Cnt.VOIDFRAC*SSE_IMY;
-	  for (int iz = 0; iz < SSE_IMZ; iz++) {
-	    for (int iy = 0; iy < SSE_IMY; iy++) {
-	      for (int ix = 0; ix < SSE_IMX; ix++) {
-		int i = iz*SSE_IMY*SSE_IMX + iy*SSE_IMX + ix;
-		if (imvol.im[i] > thrshld && iy > iyedge) {
-		  nvx++;
-		}
-	      }
-	    }
-	  }
-	} else {
-	  for (int i = 0; i<(SSE_IMX*SSE_IMY*SSE_IMZ); i++) {
-	    if (imvol.im[i]>thrshld) nvx++;
-	  }
+	for (int i = 0; i<(SSE_IMX*SSE_IMY*SSE_IMZ); i++) {
+		if (imvol.im[i]>thrshld)  nvx++;
 	}
-	
 	//------------------------------------------------------------------
 	//create the mask thru indexes
 	int *d_i2v, *d_v2i;
@@ -601,36 +586,16 @@ iMSK get_imskEm(IMflt imvol, float thrshld, Cnst Cnt)
 	HANDLE_ERROR(cudaMalloc(&d_v2i, SSE_IMX*SSE_IMY*SSE_IMZ * sizeof(int)));
 
 	nvx = 0;
-	
-	if (Cnt.GAS == 1) {
-	  iyedge = (int) Cnt.VOIDFRAC*SSE_IMY;
-	  for (int iz = 0; iz < SSE_IMZ; iz++) {
-	    for (int iy = 0; iy < SSE_IMY; iy++) {
-	      for (int ix = 0; ix < SSE_IMX; ix++) {
-		int i = iz*SSE_IMY*SSE_IMX + iy*SSE_IMX + ix;
+	for (int i = 0; i<(SSE_IMX*SSE_IMY*SSE_IMZ); i++) {
 		//if not in the mask then set to -1
 		h_v2i[i] = 0;
 		//image-based TFOV
 		if (imvol.im[i]>thrshld) {
-		  h_i2v[nvx] = i;
-		  h_v2i[i] = nvx;
-		  nvx++;
+			h_i2v[nvx] = i;
+			h_v2i[i] = nvx;
+			nvx++;
 		}
-	      }
-	    }
-	  }
-	} else {
-	  for (int i = 0; i<(SSE_IMX*SSE_IMY*SSE_IMZ); i++) {
-	    //if not in the mask then set to -1
-	    h_v2i[i] = 0;
-	    //image-based TFOV
-	    if (imvol.im[i]>thrshld) {
-	      h_i2v[nvx] = i;
-	      h_v2i[i] = nvx;
-	      nvx++;
-	    }
-	  }
-	}	
+	}
 
 	HANDLE_ERROR(cudaMemcpy(d_i2v, h_i2v, nvx * sizeof(int), cudaMemcpyHostToDevice));
 	HANDLE_ERROR(cudaMemcpy(d_v2i, h_v2i, SSE_IMX*SSE_IMY*SSE_IMZ * sizeof(int), cudaMemcpyHostToDevice));
