@@ -82,6 +82,7 @@ niftypet/nipet/sct/CMakeLists.txt
 niftypet/nipet/sct/__init__.py
 niftypet/nipet/sct/mmrsct.py
 niftypet/nipet/sct/petsct.so
+niftypet/nipet/sct/src/.DS_Store
 niftypet/nipet/sct/src/ray.cu
 niftypet/nipet/sct/src/ray.h
 niftypet/nipet/sct/src/sct.cu
